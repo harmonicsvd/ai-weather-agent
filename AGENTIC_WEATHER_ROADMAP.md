@@ -94,6 +94,22 @@ weather-agent/
 6. Evals + observability + regression tests (Phase 6)
 7. API + deployment hardening (Phase 7)
 
+## Product Value Track (Calendar + Weather)
+Target use case:
+- Proactively check upcoming in-person meetings and warn if weather risk may impact commute or attendance.
+
+MVP scope (message-only, no visuals yet):
+1. Load upcoming meetings (mock calendar source first).
+2. Filter meetings that are in-person and have a city/location.
+3. Fetch forecast/current weather for event location and time window.
+4. Assess risk using simple rules (rain/storm/wind/temperature).
+5. Produce actionable message per meeting (example: leave early, carry umbrella).
+
+Execution plan by phases:
+- Phase 2.5 (current): mock calendar + graph orchestration for recommendations.
+- Phase 4: replace mock calendar with real integration through MCP.
+- Phase 7: expose this as API endpoint and scheduled notification workflow.
+
 ## Tracker Update Protocol
 - We work in guidance mode first: you implement, I guide/review unless you explicitly ask me to code.
 - I will propose tracker updates after each milestone or sub-task.
@@ -107,8 +123,11 @@ weather-agent/
 | Phase 1: LangChain Foundation | Add typed request/response schemas for tools | You | Completed | `LocationSchema`, `CurrentWeatherSchema`, `WeatherByCityResponseSchema` added and used | 2026-03-28 |
 | Phase 1: LangChain Foundation | Add retries, timeout handling, and user-safe error messages | You | Completed | Tenacity retry + provider error mapping + city-not-found handling implemented | 2026-03-28 |
 | Phase 1: LangChain Foundation | Define stable prompt + structured output contract | You | Completed | `SYSTEM_PROMPT` + `ResponseFormat` stable; manual runs and tests verified | 2026-03-28 |
-| Phase 2: LangGraph Orchestration | Build first graph with state + conditional edges | You | Planned | Pending | Pending |
+| Phase 2: LangGraph Orchestration | Build first graph with state + conditional edges | You | Completed | Implemented `GraphState` + graph nodes/workflow; validated explicit/implicit/invalid city runs via `apps/graph/run_graph.py` | 2026-03-29 |
 | Phase 2: LangGraph Orchestration | Add persistent checkpointer (non-memory) | You | Planned | Pending | Pending |
+| Phase 2.5: Product Value Track | Build mock calendar ingestion node for upcoming meetings | You | Completed | `load_mock_events` node + meeting preview graph execution validated | 2026-03-29 |
+| Phase 2.5: Product Value Track | Add in-person event filtering and weather risk scoring node | You | Completed | Implemented `filter_in_person_events`, `fetch_weather_for_events`, `score_event_weather_risk` with structured `risk_summary` | 2026-03-29 |
+| Phase 2.5: Product Value Track | Generate actionable weather recommendations per meeting | You | Completed | `format_meeting_recommendations` produces final actionable meeting weather advice | 2026-03-29 |
 | Phase 3: RAG Layer | Build ingestion pipeline (load/chunk/embed/index) | You | Planned | Pending | Pending |
 | Phase 3: RAG Layer | Add retriever tool + grounded response behavior | You | Planned | Pending | Pending |
 | Phase 4: MCP Integration | Integrate at least one MCP tool/server | You | Planned | Pending | Pending |
@@ -126,6 +145,9 @@ Status legend:
 - 2026-03-28: Added initial roadmap and learning references.
 - 2026-03-28: Added confirmation-gated tracker template (`yes do it` required before updates).
 - 2026-03-28: Phase 1 foundation marked completed with verification (`python -m pytest -q` -> `6 passed in 0.12s`).
+- 2026-03-29: Added real-world product value track (calendar-aware weather recommendations) and Phase 2.5 tasks.
+- 2026-03-29: Phase 2 graph orchestration milestone completed (`GraphState` + conditional routing + successful demo runs).
+- 2026-03-29: Phase 2.5 product value track completed (meeting weather risk scoring + recommendations), validated with tests (`python -m pytest -q` -> `8 passed in 0.29s`).
 
 ## Note For Next Session
-Start with Phase 1 implementation and refactor the current file layout toward `app/graph`, `app/tools`, and `tests`.
+Implement Phase 2.5 calendar-aware recommendation flow (mock calendar data first), then add persistent checkpointer for Phase 2.
