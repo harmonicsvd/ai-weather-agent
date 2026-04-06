@@ -30,7 +30,7 @@ This project supports two flows:
 - Calendar events are loaded from a backend API (`/events`)
 - In-person meetings are identified using explicit `meeting_mode`
 - If event city is missing, graph can use user default city from `data/user_profiles.json`
-- Weather risk recommendations are generated per meeting with robust fallback handling
+- Weather risk recommendations are generated per meeting with fallback handling
 
 ## Model
 - Provider: Google GenAI
@@ -69,6 +69,16 @@ CALENDAR_API_BASE_URL=http://127.0.0.1:8000
 ```
 
 `CALENDAR_API_BASE_URL` should point to your running calendar backend (`voice-scheduling-agent`) that exposes `GET /events`.
+
+## Integration
+This repository works with a companion service:
+
+- Weather orchestration service: `ai-weather-agent` (this repo)
+- Calendar/voice backend service: `voice-scheduling-agent`
+- Integration contract: weather graph reads meetings from `GET /events`
+- Runtime dependency: `CALENDAR_API_BASE_URL` must point to the voice backend URL
+
+This separation keeps scheduling concerns (voice + calendar writes) in one service and weather decisioning/orchestration in another.
 
 ## Run
 Weather agent:
