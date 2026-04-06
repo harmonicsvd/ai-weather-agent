@@ -13,6 +13,35 @@ from datetime import datetime, timedelta, timezone
 
 from apps.tools.calendar_client import CalendarClient, CalendarProviderError
 
+from pathlib import Path
+import json
+
+USER_PROFILES_PATH = Path(__file__).resolve().parents[2] / "data" / "user_profiles.json"
+
+def _get_user_default_city(user_id: str | None) -> str | None:
+    if not user_id:
+        return None
+    try:
+        profiles = json.loads(USER_PROFILES_PATH.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+    return (profiles.get(str(user_id)) or {}).get("default_city")
+
+
+def apply_user_default_city(state: GraphState) -> GraphState:
+    events = state.get("in_person_events") or []
+    default_city = _get_user_default_city(state.get("user_id"))
+    updated = []
+
+    for event in events:
+        if event.get("city"):
+            updated.append(event)
+        elif default_city:
+            updated.append({**event, "city": default_city, "city_source": "user_default"})
+        else:
+            updated.append({**event, "city": None, "city_source": "missing"})
+    return {"in_person_events": updated}
+
 
 # Minimal pattern for phrases like: "weather in Hamburg?"
 CITY_PATTERN = re.compile(r"\bin\s+([A-Za-z\s\-']+)\??$", re.IGNORECASE)
@@ -133,24 +162,35 @@ def load_calendar_events(state: GraphState) -> GraphState:
                 "time": event.start,
                 "location": event.location,
                 "is_virtual": event.is_virtual,
+                "meeting_mode": event.meeting_mode,
                 # For now use location as city when available.
                 # Later we can add geocoding parser.
-                "city": event.location,
+                "city": event.city,
             }
         )
 
     return {"events": normalized, "error": None}
 
-
 def filter_in_person_events(state: GraphState) -> GraphState:
     events = state.get("events") or []
     in_person_events = []
+
     for event in events:
-        is_virtual = bool(event.get("is_virtual"))
-        location_text = (event.get("location") or "").lower()
-        if not is_virtual and location_text != "zoom":
+        mode = (event.get("meeting_mode") or "unknown").strip().lower()
+
+        if mode == "in_person":
             in_person_events.append(event)
+            continue
+
+        if mode == "online":
+            continue
+
+        # Fallback for older events where meeting_mode may be missing.
+        if not bool(event.get("is_virtual")):
+            in_person_events.append(event)
+
     return {"in_person_events": in_person_events}
+
 
 
 
@@ -164,7 +204,7 @@ def fetch_weather_for_events(state: GraphState) -> GraphState:
         for event in events:
             city = event.get("city")
             if not city:
-                results.append({"event": event, "weather": None})
+                results.append({"event": event, "weather": None, "reason": "missing location"})
                 continue
 
             try:
@@ -173,14 +213,16 @@ def fetch_weather_for_events(state: GraphState) -> GraphState:
                 # does not depend on custom class reconstruction.
                 results.append({"event": event, "weather": weather.model_dump()})
             except (CityNotFoundError, WeatherProviderError):
-                results.append({"event": event, "weather": None})
+                results.append({"event": event, "weather": None,"reason": "weather unavailable"})
     return {"event_weather": results}
 
 
 def score_event_weather_risk(state: GraphState) -> GraphState:
     """
-    Simple heuristic to score weather risk for each event.
-    This is a placeholder for more complex logic or an LLM-based evaluator.
+    Score weather risk for each event.
+    - blocked: missing meeting location
+    - unknown: weather unavailable for other reasons
+    - low/moderate/high: based on weather code + wind speed
     """
     event_weather = state.get("event_weather") or []
     risk_summary = []
@@ -189,18 +231,34 @@ def score_event_weather_risk(state: GraphState) -> GraphState:
     for item in event_weather:
         event = item["event"]
         weather = item["weather"]
+
         if weather is None:
-            risk_summary.append(
-                {
-                    "event_title": event.get("title"),
-                    "city": event.get("city"),
-                    "risk": "unknown",
-                    "reason": "weather unavailable",
-                }
-            )
-            recommendations.append(
-                f"Could not fetch weather for event '{event['title']}' in {event.get('city')}."
-            )
+            reason = item.get("reason") or "weather unavailable"
+
+            if reason == "missing location":
+                risk_summary.append(
+                    {
+                        "event_title": event.get("title"),
+                        "city": event.get("city"),
+                        "risk": "blocked",
+                        "reason": reason,
+                    }
+                )
+                recommendations.append(
+                    f"{event.get('title')}: Add meeting location to evaluate weather risk."
+                )
+            else:
+                risk_summary.append(
+                    {
+                        "event_title": event.get("title"),
+                        "city": event.get("city"),
+                        "risk": "unknown",
+                        "reason": reason,
+                    }
+                )
+                recommendations.append(
+                    f"Could not fetch weather for event '{event.get('title')}' in {event.get('city')}."
+                )
             continue
 
         current = weather.get("current_weather", {})

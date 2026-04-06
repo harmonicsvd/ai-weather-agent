@@ -46,4 +46,4 @@ def run_case(user_query: str, user_id: str, label: str) -> None:
 
 
 if __name__ == "__main__":
-    run_case("What are my meetings today?", "1", "meeting-preview")
+    run_case("What are my meetings today?", "2", "meeting-preview")

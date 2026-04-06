@@ -25,8 +25,8 @@ class GraphState(TypedDict, total=False):
     weather: WeatherByCityResponseSchema | None
     error: str | None
     final_response: str | None
-    
-    #meetings fields
+
+    # Meeting fields
     events: list[dict] | None
     in_person_events: list[dict] | None
     recommendations: list[str] | None

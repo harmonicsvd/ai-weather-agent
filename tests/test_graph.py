@@ -1,5 +1,6 @@
 import pytest
-from apps.graph.nodes import score_event_weather_risk
+from apps.graph.nodes import score_event_weather_risk, filter_in_person_events
+
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from apps.graph import workflows
@@ -106,3 +107,46 @@ def test_meeting_graph_checkpoint_history_grows(tmp_path, monkeypatch):
 
     assert first > 0
     assert second > first
+    
+def test_in_person_with_location_risk_is_computed() -> None:
+    state = {
+        "event_weather": [
+            {
+                "event": {"title": "Office Visit", "city": "Berlin", "meeting_mode": "in_person"},
+                "weather": _make_weather(weather_code=3, wind_speed_kmh=12.0, temperature_c=9.0),
+            }
+        ]
+    }
+
+    result = score_event_weather_risk(state)
+    assert result["risk_summary"][0]["risk"] in {"low", "moderate", "high"}
+    assert "blocked" not in result["risk_summary"][0]["risk"]
+
+
+def test_missing_location_is_blocked() -> None:
+    state = {
+        "event_weather": [
+            {
+                "event": {"title": "Client Visit", "city": None, "meeting_mode": "in_person"},
+                "weather": None,
+                "reason": "missing location",
+            }
+        ]
+    }
+
+    result = score_event_weather_risk(state)
+    assert result["risk_summary"][0]["risk"] == "blocked"
+    assert "Add meeting location to evaluate weather risk" in result["recommendations"][0]
+
+
+def test_online_events_are_excluded_from_in_person_filter() -> None:
+    state = {
+        "events": [
+            {"title": "Online Sync", "meeting_mode": "online", "is_virtual": True},
+            {"title": "Office Meet", "meeting_mode": "in_person", "is_virtual": False},
+        ]
+    }
+
+    result = filter_in_person_events(state)
+    titles = [e["title"] for e in result["in_person_events"]]
+    assert titles == ["Office Meet"]

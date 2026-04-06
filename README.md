@@ -7,18 +7,30 @@ This project supports two flows:
 - Single-city weather assistant (tool-calling agent)
 - Meeting weather-risk preview (graph orchestration + calendar events)
 
-## Current Working Status
-- LangChain weather tool flow is live in `main.py`
-- Open-Meteo client is implemented with retry + timeout handling
-- Pydantic schemas validate weather and calendar payloads
-- LangGraph meeting preview flow is implemented with:
+## Project Evolution
+### Phase 1: LangChain Foundation
+- Implemented a tool-calling weather assistant in `main.py`
+- Added a resilient Open-Meteo client with retry and timeout handling
+- Introduced Pydantic schemas for typed weather responses
+- Added tests for weather client behavior and error handling
+
+### Phase 2: LangGraph Orchestration
+- Built a stateful meeting-weather workflow using LangGraph
+- Added graph nodes for:
   - calendar event loading
-  - in-person meeting filtering
+  - in-person event filtering
+  - user default-city fallback (mock JSON profile store)
   - per-event weather fetch
-  - weather risk scoring (`low` / `moderate` / `high`)
-  - final recommendation formatting
-- SQLite checkpointing is enabled for graph run history
-- Test suites are passing for weather client and graph logic
+  - weather risk scoring (`low` / `moderate` / `high`, plus `blocked`/`unknown`)
+  - recommendation formatting
+- Enabled SQLite checkpointing for thread-level state history
+- Added graph tests for risk logic, filtering, and checkpoint growth
+
+## Current Working Status
+- Calendar events are loaded from a backend API (`/events`)
+- In-person meetings are identified using explicit `meeting_mode`
+- If event city is missing, graph can use user default city from `data/user_profiles.json`
+- Weather risk recommendations are generated per meeting with robust fallback handling
 
 ## Model
 - Provider: Google GenAI
@@ -77,7 +89,7 @@ python -m pytest -q
 ```
 
 ## Next Progress
-- Improve meeting location-to-city resolution (handle `location=None` and free-text addresses)
-- Add dedicated tests for calendar event loading node
-- Add graceful fallbacks when calendar data is incomplete
-- Extend risk scoring with event time + forecast window instead of only current weather
+- Replace mock profile JSON with real persisted user profile storage
+- Add dedicated tests for calendar loading + profile fallback integration
+- Extend risk scoring to event-time forecast instead of only current weather
+- Add API/graph observability metrics for production monitoring

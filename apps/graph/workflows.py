@@ -10,6 +10,7 @@ from apps.graph.nodes import (
     fetch_weather_for_events,
     score_event_weather_risk,
     format_meeting_recommendations,
+    apply_user_default_city,
 )
 
 from apps.graph.state import GraphState
@@ -78,10 +79,13 @@ def build_meeting_preview_graph(checkpointer=None):
     graph.add_node("fetch_weather_for_events", fetch_weather_for_events)
     graph.add_node("score_event_weather_risk", score_event_weather_risk)
     graph.add_node("format_meeting_recommendations", format_meeting_recommendations)
+    graph.add_node("apply_user_default_city", apply_user_default_city)
+
 
     graph.add_edge(START, "load_calendar_events")
     graph.add_edge("load_calendar_events", "filter_in_person_events")
-    graph.add_edge("filter_in_person_events", "fetch_weather_for_events")
+    graph.add_edge("filter_in_person_events", "apply_user_default_city")
+    graph.add_edge("apply_user_default_city", "fetch_weather_for_events")
     graph.add_edge("fetch_weather_for_events", "score_event_weather_risk")
     graph.add_edge("score_event_weather_risk", "format_meeting_recommendations")
     graph.add_edge("format_meeting_recommendations", END)

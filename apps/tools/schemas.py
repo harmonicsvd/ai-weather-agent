@@ -34,6 +34,9 @@ class CalendarEventSchema(BaseModel):
     end: str | None = None
     location: str | None = None
     is_virtual: bool = False
+    meeting_mode: str = "unknown"
+    city: str | None = None
+
 
 
 class CalendarEventsResponseSchema(BaseModel):
