@@ -27,3 +27,17 @@ class WeatherByCityResponseSchema(BaseModel):
 
     location: LocationSchema
     current_weather: CurrentWeatherSchema
+    
+class CalendarEventSchema(BaseModel):
+    title: str
+    start: str | None = None
+    end: str | None = None
+    location: str | None = None
+    is_virtual: bool = False
+    meeting_mode: str = "unknown"
+    city: str | None = None
+
+
+
+class CalendarEventsResponseSchema(BaseModel):
+    events: list[CalendarEventSchema] = Field(default_factory=list)

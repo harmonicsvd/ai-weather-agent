@@ -16,3 +16,9 @@ venv/
 
 # IDE
 .vscode/
+
+data/*.sqlite*
+
+
+# Local learning tracker (keep local only)
+AGENTIC_WEATHER_ROADMAP.md
