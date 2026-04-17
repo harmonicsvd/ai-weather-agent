@@ -239,13 +239,19 @@ def fetch_weather_for_events(state: GraphState) -> GraphState:
                 results.append({"event": event, "weather": None, "reason": "missing location"})
                 continue
 
+            event_time = event.get("time")
+            if not event_time:
+                results.append({"event": event, "weather": None, "reason": "missing event time"})
+                continue
+
             try:
-                weather = client.get_current_weather_by_city(city)
-                # Store plain dict in graph state so checkpoint serialization
-                # does not depend on custom class reconstruction.
+                weather = client.get_weather_by_city_at_iso(city, event_time)
                 results.append({"event": event, "weather": weather.model_dump()})
+            except ValueError:
+                results.append({"event": event, "weather": None, "reason": "invalid event time"})
             except (CityNotFoundError, WeatherProviderError):
-                results.append({"event": event, "weather": None,"reason": "weather unavailable"})
+                results.append({"event": event, "weather": None, "reason": "weather unavailable"})
+
     return {"event_weather": results}
 
 
@@ -267,7 +273,7 @@ def score_event_weather_risk(state: GraphState) -> GraphState:
         if weather is None:
             reason = item.get("reason") or "weather unavailable"
 
-            if reason == "missing location":
+            if reason in {"missing location", "missing event time", "invalid event time"}:
                 risk_summary.append(
                     {
                         "event_title": event.get("title"),
@@ -276,9 +282,19 @@ def score_event_weather_risk(state: GraphState) -> GraphState:
                         "reason": reason,
                     }
                 )
-                recommendations.append(
-                    f"{event.get('title')}: Add meeting location to evaluate weather risk."
-                )
+
+                if reason == "missing location":
+                    recommendations.append(
+                        f"{event.get('title')}: Add meeting location/city to evaluate weather risk."
+                    )
+                elif reason == "missing event time":
+                    recommendations.append(
+                        f"{event.get('title')}: Meeting time is missing; cannot evaluate event-time weather risk."
+                    )
+                else:  # invalid event time
+                    recommendations.append(
+                        f"{event.get('title')}: Meeting time format is invalid; cannot evaluate event-time weather risk."
+                    )
             else:
                 risk_summary.append(
                     {
@@ -292,6 +308,7 @@ def score_event_weather_risk(state: GraphState) -> GraphState:
                     f"Could not fetch weather for event '{event.get('title')}' in {event.get('city')}."
                 )
             continue
+
 
         current = weather.get("current_weather", {})
         weather_code = current.get("weather_code") or 0
@@ -341,3 +358,22 @@ def format_meeting_recommendations(state: GraphState) -> GraphState:
 
     formatted_response = "Weather Risk Recommendations for Your Meetings:\n" + "\n".join(recommendations)
     return {"final_response": formatted_response}
+
+
+def add_high_risk_actions(state: GraphState) -> GraphState:
+    """
+    Add specific action recommendations for high-risk events.
+    """
+    risk_summary = state.get("risk_summary") or []
+    recommendations= list(state.get("recommendations") or [])
+    
+    
+    high_risk_items=[item for item in risk_summary if item.get("risk")=="high"]
+    if not high_risk_items:
+        return{"recommendations": recommendations}    
+    
+    recommendations.append(
+        "High-risk travel guidance: leave at least 30 minutes early, check transit disruptions, and carry weather protection."
+    )
+    
+    return {"recommendations": recommendations}

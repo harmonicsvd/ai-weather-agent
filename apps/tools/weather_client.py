@@ -11,6 +11,8 @@ from apps.tools.schemas import (
     WeatherByCityResponseSchema,
 )
 
+from datetime import datetime, timezone
+
 
 # Open-Meteo endpoints used by this client.
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
@@ -142,4 +144,88 @@ class OpenMeteoClient:
         }
 
         # model_validate ensures downstream code receives a typed, safe object.
+        return WeatherByCityResponseSchema.model_validate(unvalidated_data)
+
+    @staticmethod
+    def _parse_iso_to_utc(value: str) -> datetime:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    
+    def get_weather_at_iso(self, lat: float, lon: float, target_iso: str) -> CurrentWeatherSchema:
+        """
+        Fetch hourly weather and select the closest point to target datetime (UTC).
+        """
+        target_utc = self._parse_iso_to_utc(target_iso)
+        target_date = target_utc.date().isoformat()
+
+        data = self._get_json(
+            FORECAST_URL,
+            {
+                "latitude": lat,
+                "longitude": lon,
+                "hourly": "temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code",
+                "timezone": "UTC",
+                "start_date": target_date,
+                "end_date": target_date,
+            },
+        )
+
+        hourly = data.get("hourly") or {}
+        times = hourly.get("time") or []
+        if not times:
+            raise WeatherProviderError("Hourly weather data is missing from provider response.")
+
+        closest_index: int | None = None
+        closest_time_utc: datetime | None = None
+        closest_diff_seconds: float | None = None
+
+        for idx, raw_time in enumerate(times):
+            try:
+                point_utc = self._parse_iso_to_utc(raw_time)
+            except ValueError:
+                continue
+
+            diff = abs((point_utc - target_utc).total_seconds())
+            if closest_diff_seconds is None or diff < closest_diff_seconds:
+                closest_diff_seconds = diff
+                closest_index = idx
+                closest_time_utc = point_utc
+
+        if closest_index is None or closest_time_utc is None:
+            raise WeatherProviderError("Hourly weather data is invalid in provider response.")
+
+        def _value(key: str):
+            series = hourly.get(key) or []
+            return series[closest_index] if closest_index < len(series) else None
+
+        return CurrentWeatherSchema(
+            temperature_c=_value("temperature_2m"),
+            apparent_temperature_c=_value("apparent_temperature"),
+            humidity_percent=_value("relative_humidity_2m"),
+            wind_speed_kmh=_value("wind_speed_10m"),
+            weather_code=_value("weather_code"),
+            observation_time=closest_time_utc.isoformat().replace("+00:00", "Z"),
+        )
+        
+        
+    def get_weather_by_city_at_iso(self, city: str, target_iso: str) -> WeatherByCityResponseSchema:
+        """
+        Resolve city and fetch hourly weather nearest to target datetime.
+        Returned shape remains compatible with WeatherByCityResponseSchema.
+        """
+        location = self.geocode_city(city)
+        weather = self.get_weather_at_iso(location.latitude, location.longitude, target_iso)
+
+        unvalidated_data = {
+            "location": {
+                "name": location.name,
+                "country": location.country,
+                "latitude": location.latitude,
+                "longitude": location.longitude,
+            },
+            "current_weather": weather,
+        }
         return WeatherByCityResponseSchema.model_validate(unvalidated_data)

@@ -11,9 +11,17 @@ from apps.graph.nodes import (
     score_event_weather_risk,
     format_meeting_recommendations,
     apply_user_default_city,
+    add_high_risk_actions,
+    
 )
 
 from apps.graph.state import GraphState
+
+
+def route_after_risk_scoring(state: GraphState) -> str:
+    risk_summary = state.get("risk_summary") or []
+    has_high_risk = any(item.get("risk") == "high" for item in risk_summary)
+    return "add_high_risk_actions" if has_high_risk else "format_meeting_recommendations"
 
 
 def route_after_intent(state: GraphState) -> str:
@@ -80,6 +88,8 @@ def build_meeting_preview_graph(checkpointer=None):
     graph.add_node("score_event_weather_risk", score_event_weather_risk)
     graph.add_node("format_meeting_recommendations", format_meeting_recommendations)
     graph.add_node("apply_user_default_city", apply_user_default_city)
+    graph.add_node("add_high_risk_actions", add_high_risk_actions)
+
 
 
     graph.add_edge(START, "load_calendar_events")
@@ -87,7 +97,16 @@ def build_meeting_preview_graph(checkpointer=None):
     graph.add_edge("filter_in_person_events", "apply_user_default_city")
     graph.add_edge("apply_user_default_city", "fetch_weather_for_events")
     graph.add_edge("fetch_weather_for_events", "score_event_weather_risk")
-    graph.add_edge("score_event_weather_risk", "format_meeting_recommendations")
+    graph.add_conditional_edges(
+        "score_event_weather_risk",
+        route_after_risk_scoring,
+        {
+            "add_high_risk_actions": "add_high_risk_actions",
+            "format_meeting_recommendations": "format_meeting_recommendations",
+        },
+    )
+    graph.add_edge("add_high_risk_actions", "format_meeting_recommendations")
+
     graph.add_edge("format_meeting_recommendations", END)
 
     return graph.compile(checkpointer=checkpointer)

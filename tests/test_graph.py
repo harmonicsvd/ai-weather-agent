@@ -3,6 +3,7 @@ from apps.graph.nodes import (
     score_event_weather_risk,
     filter_in_person_events,
     apply_user_default_city,
+    add_high_risk_actions,
 )
 
 
@@ -140,7 +141,8 @@ def test_missing_location_is_blocked() -> None:
 
     result = score_event_weather_risk(state)
     assert result["risk_summary"][0]["risk"] == "blocked"
-    assert "Add meeting location to evaluate weather risk" in result["recommendations"][0]
+    assert "Add meeting location/city to evaluate weather risk" in result["recommendations"][0]
+
 
 
 def test_online_events_are_excluded_from_in_person_filter() -> None:
@@ -236,3 +238,66 @@ def test_apply_user_default_city_marks_missing_when_no_profile_or_default(
     updated = result["in_person_events"][0]
     assert updated["city"] is None
     assert updated["city_source"] == "missing"
+
+
+def test_score_event_weather_risk_blocked_for_missing_event_time():
+    state = {
+        "event_weather": [
+            {
+                "event": {"title": "Site Visit", "city": "Berlin"},
+                "weather": None,
+                "reason": "missing event time",
+            }
+        ]
+    }
+
+    out = score_event_weather_risk(state)
+
+    assert out["risk_summary"][0]["risk"] == "blocked"
+    assert out["risk_summary"][0]["reason"] == "missing event time"
+    assert "missing" in out["recommendations"][0].lower()
+
+
+def test_score_event_weather_risk_blocked_for_invalid_event_time():
+    state = {
+        "event_weather": [
+            {
+                "event": {"title": "Client Meeting", "city": "Hamburg"},
+                "weather": None,
+                "reason": "invalid event time",
+            }
+        ]
+    }
+
+    out = score_event_weather_risk(state)
+
+    assert out["risk_summary"][0]["risk"] == "blocked"
+    assert out["risk_summary"][0]["reason"] == "invalid event time"
+    assert "invalid" in out["recommendations"][0].lower()
+
+
+def test_add_high_risk_actions_appends_guidance() -> None:
+    state = {
+        "risk_summary": [
+            {"event_title": "Site Visit", "risk": "high", "city": "Berlin"}
+        ],
+        "recommendations": ["Site Visit (Berlin): high weather risk."],
+    }
+
+    out = add_high_risk_actions(state)
+
+    assert len(out["recommendations"]) == 2
+    assert "High-risk travel guidance" in out["recommendations"][-1]
+
+
+def test_add_high_risk_actions_no_change_when_no_high_risk() -> None:
+    state = {
+        "risk_summary": [
+            {"event_title": "Office Sync", "risk": "low", "city": "Hamburg"}
+        ],
+        "recommendations": ["Office Sync (Hamburg): low weather risk."],
+    }
+
+    out = add_high_risk_actions(state)
+
+    assert out["recommendations"] == ["Office Sync (Hamburg): low weather risk."]
