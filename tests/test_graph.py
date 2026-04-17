@@ -1,5 +1,9 @@
 import pytest
-from apps.graph.nodes import score_event_weather_risk, filter_in_person_events
+from apps.graph.nodes import (
+    score_event_weather_risk,
+    filter_in_person_events,
+    apply_user_default_city,
+)
 
 
 from langgraph.checkpoint.sqlite import SqliteSaver
@@ -150,3 +154,85 @@ def test_online_events_are_excluded_from_in_person_filter() -> None:
     result = filter_in_person_events(state)
     titles = [e["title"] for e in result["in_person_events"]]
     assert titles == ["Office Meet"]
+
+
+def test_apply_user_default_city_uses_profile_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeProfile:
+        default_city = "Hamburg"
+
+    class _FakeProfileClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def get_profile_by_sub(self, sub: str):
+            assert sub == "104659023322141767006"
+            return _FakeProfile()
+
+    monkeypatch.setattr("apps.graph.nodes.ProfileClient", _FakeProfileClient)
+
+    state = {
+        "user_id": "1",
+        "in_person_events": [
+            {"title": "Client Visit", "city": None, "user_sub": "104659023322141767006"}
+        ],
+    }
+
+    result = apply_user_default_city(state)
+    updated = result["in_person_events"][0]
+    assert updated["city"] == "Hamburg"
+    assert updated["city_source"] == "profile_api"
+
+
+def test_apply_user_default_city_falls_back_to_local_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeProfileClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def get_profile_by_sub(self, sub: str):
+            return None
+
+    monkeypatch.setattr("apps.graph.nodes.ProfileClient", _FakeProfileClient)
+    monkeypatch.setattr("apps.graph.nodes._get_user_default_city", lambda user_id: "Berlin")
+
+    state = {
+        "user_id": "1",
+        "in_person_events": [{"title": "Site Visit", "city": None, "user_sub": "x"}],
+    }
+
+    result = apply_user_default_city(state)
+    updated = result["in_person_events"][0]
+    assert updated["city"] == "Berlin"
+    assert updated["city_source"] == "user_default"
+
+
+def test_apply_user_default_city_marks_missing_when_no_profile_or_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeProfileClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return None
+
+        def get_profile_by_sub(self, sub: str):
+            return None
+
+    monkeypatch.setattr("apps.graph.nodes.ProfileClient", _FakeProfileClient)
+    monkeypatch.setattr("apps.graph.nodes._get_user_default_city", lambda user_id: None)
+
+    state = {
+        "user_id": "1",
+        "in_person_events": [{"title": "Site Visit", "city": None, "user_sub": "x"}],
+    }
+
+    result = apply_user_default_city(state)
+    updated = result["in_person_events"][0]
+    assert updated["city"] is None
+    assert updated["city_source"] == "missing"

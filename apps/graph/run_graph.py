@@ -33,10 +33,12 @@ def run_case(user_query: str, user_id: str, label: str) -> None:
 
         print(f"\n[{label}]")
         print("thread_id:", config["configurable"]["thread_id"])
+        print("error:", result.get("error"))
         print("in_person_events:", result.get("in_person_events"))
         print("risk_summary:", result.get("risk_summary"))
         print("recommendations:", result.get("recommendations"))
         print("final_response:", result.get("final_response"))
+        
 
         latest = app.get_state(config)
         history = list(app.get_state_history(config))

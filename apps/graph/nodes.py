@@ -15,6 +15,7 @@ from apps.tools.calendar_client import CalendarClient, CalendarProviderError
 
 from pathlib import Path
 import json
+from apps.tools.profile_client import ProfileClient, ProfileProviderError
 
 USER_PROFILES_PATH = Path(__file__).resolve().parents[2] / "data" / "user_profiles.json"
 
@@ -30,17 +31,36 @@ def _get_user_default_city(user_id: str | None) -> str | None:
 
 def apply_user_default_city(state: GraphState) -> GraphState:
     events = state.get("in_person_events") or []
-    default_city = _get_user_default_city(state.get("user_id"))
+    local_default_city = _get_user_default_city(state.get("user_id"))
     updated = []
 
-    for event in events:
-        if event.get("city"):
-            updated.append(event)
-        elif default_city:
-            updated.append({**event, "city": default_city, "city_source": "user_default"})
-        else:
-            updated.append({**event, "city": None, "city_source": "missing"})
+    with ProfileClient() as profile_client:
+        for event in events:
+            if event.get("city"):
+                updated.append(event)
+                continue
+
+            city = None
+            city_source = "missing"
+
+            user_sub = event.get("user_sub")
+            if user_sub:
+                try:
+                    profile = profile_client.get_profile_by_sub(user_sub)
+                    if profile and profile.default_city:
+                        city = profile.default_city
+                        city_source = "profile_api"
+                except ProfileProviderError:
+                    pass
+
+            if not city and local_default_city:
+                city = local_default_city
+                city_source = "user_default"
+
+            updated.append({**event, "city": city, "city_source": city_source})
+
     return {"in_person_events": updated}
+
 
 
 # Minimal pattern for phrases like: "weather in Hamburg?"
@@ -142,11 +162,17 @@ def format_response(state: GraphState) -> GraphState:
 
 def load_calendar_events(state: GraphState) -> GraphState:
     """
-    Load meetings from calendar API for the next 2 days.
+    Load meetings from calendar API for today + next day.
+    We intentionally start at day-begin (UTC) so "today" runs still include
+    meetings that already happened earlier in the same day.
     """
-    now = datetime.now(timezone.utc)
-    from_iso = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    to_iso = (now + timedelta(days=2)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    from_iso = state.get("from_iso")
+    to_iso = state.get("to_iso")
+    if not from_iso or not to_iso:
+        now_utc = datetime.now(timezone.utc)
+        day_start_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        from_iso = day_start_utc.isoformat().replace("+00:00", "Z")
+        to_iso = (day_start_utc + timedelta(days=2)).isoformat().replace("+00:00", "Z")
 
     try:
         with CalendarClient() as client:
@@ -166,8 +192,14 @@ def load_calendar_events(state: GraphState) -> GraphState:
                 # For now use location as city when available.
                 # Later we can add geocoding parser.
                 "city": event.city,
+                "city_source": event.city_source,
+                "user_sub": event.user_sub,
             }
         )
+
+    requested_sub = (state.get("user_sub") or "").strip()
+    if requested_sub:
+        normalized = [event for event in normalized if event.get("user_sub") == requested_sub]
 
     return {"events": normalized, "error": None}
 

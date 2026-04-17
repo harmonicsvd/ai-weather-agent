@@ -14,6 +14,11 @@ class GraphState(TypedDict, total=False):
     # Request context captured at graph entry.
     user_id: str
     user_query: str
+    user_sub: str | None
+    from_iso: str | None
+    to_iso: str | None
+    timezone: str | None
+    target_date: str | None
 
     # Routing + resolution state.
     # Literal restricts values to known route labels for safer branching.
