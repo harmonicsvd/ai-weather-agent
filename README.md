@@ -1,105 +1,122 @@
 # AI Weather Agent
 
-An AI weather assistant built with LangChain and LangGraph.
+LangGraph-based weather decisioning service for meeting workflows.
 
-## Overview
-This project supports two flows:
-- Single-city weather assistant (tool-calling agent)
-- Meeting weather-risk preview (graph orchestration + calendar events)
+## What It Does
+- Reads meetings from a calendar backend.
+- Filters in-person events.
+- Resolves weather city (event city or profile fallback).
+- Fetches weather from Open-Meteo.
+- Scores commute/weather risk per event.
+- Returns recommendations and summary payloads via internal API.
 
-## Project Evolution
-### Phase 1: LangChain Foundation
-- Implemented a tool-calling weather assistant in `main.py`
-- Added a resilient Open-Meteo client with retry and timeout handling
-- Introduced Pydantic schemas for typed weather responses
-- Added tests for weather client behavior and error handling
+## Scope
+This repository owns:
+- LangGraph workflow orchestration
+- Weather retrieval + normalization
+- Rule-based risk scoring
+- Internal summary API for downstream services
 
-### Phase 2: LangGraph Orchestration
-- Built a stateful meeting-weather workflow using LangGraph
-- Added graph nodes for:
-  - calendar event loading
-  - in-person event filtering
-  - user default-city fallback (mock JSON profile store)
-  - per-event weather fetch
-  - weather risk scoring (`low` / `moderate` / `high`, plus `blocked`/`unknown`)
-  - recommendation formatting
-- Enabled SQLite checkpointing for thread-level state history
-- Added graph tests for risk logic, filtering, and checkpoint growth
+It is designed to work with a companion backend (`voice-scheduling-agent`) that provides:
+- Calendar read endpoints
+- Profile endpoints
+- Voice assistant integration
 
-## Current Working Status
-- Calendar events are loaded from a backend API (`/events`)
-- In-person meetings are identified using explicit `meeting_mode`
-- If event city is missing, graph can use user default city from `data/user_profiles.json`
-- Weather risk recommendations are generated per meeting with fallback handling
+## Architecture
+### Workflows
+- `build_weather_graph` (`apps/graph/workflows.py`)
+- `build_meeting_preview_graph` (`apps/graph/workflows.py`)
 
-## Model
-- Provider: Google GenAI
-- Model: `gemini-2.5-flash`
-- Integration: `init_chat_model("google_genai:gemini-2.5-flash")`
+### Main Nodes
+- `load_calendar_events`
+- `filter_in_person_events`
+- `apply_user_default_city`
+- `fetch_weather_for_events`
+- `score_event_weather_risk`
+- `format_meeting_recommendations`
 
-## Repository Structure
-- `main.py`: LangChain weather agent entrypoint
-- `apps/tools/weather_client.py`: Open-Meteo weather client
-- `apps/tools/calendar_client.py`: calendar events API client
-- `apps/tools/schemas.py`: Pydantic schemas
-- `apps/graph/state.py`: shared graph state contract
-- `apps/graph/nodes.py`: graph node implementations
-- `apps/graph/workflows.py`: graph definitions
-- `apps/graph/run_graph.py`: local graph runner
-- `tests/test_weather_client.py`: weather client tests
-- `tests/test_graph.py`: graph/risk/checkpoint tests
+Node implementations live in `apps/graph/nodes.py`.
 
-## Requirements
-- Python 3.11+
-- Dependencies:
-  - `langchain`
-  - `langgraph`
-  - `python-dotenv`
-  - `httpx`
-  - `tenacity`
-  - `pydantic`
-  - `pytest`
+### State
+Graph state contract: `apps/graph/state.py`.
 
-## Environment
-Create `.env` in project root with:
+### Clients
+- Weather: `apps/tools/weather_client.py`
+- Calendar backend: `apps/tools/calendar_client.py`
+- Profile backend: `apps/tools/profile_client.py`
+- Schemas: `apps/tools/schemas.py`
 
+## Risk Scoring
+Current scoring is deterministic (rule-based):
+- `high`
+- `moderate`
+- `low`
+- `blocked` (missing location/city context)
+- `unknown` (weather unavailable)
+
+## Internal API
+Defined in `apps/api/main.py`.
+
+### Endpoints
+- `GET /health`
+- `GET /internal/meeting-weather-summary`
+
+### `GET /internal/meeting-weather-summary`
+Query params:
+- `user_sub` (required)
+- `date` (`YYYY-MM-DD`, optional)
+- `tz` (IANA timezone, optional, default `Europe/Berlin`)
+
+Header:
+- `X-Internal-API-Key`
+
+Response contains:
+- event counts
+- event list
+- risk summary
+- recommendations
+- `summary_text`
+
+## Integration Contract
+This service calls the companion backend:
+- `GET /internal/events`
+- `GET /internal/profile/{sub}`
+
+The companion backend calls this service:
+- `GET /internal/meeting-weather-summary`
+
+All internal routes are key-protected.
+
+## Configuration
+Copy `.env.example` to `.env` and set values.
+
+Required variables:
 ```env
-GOOGLE_API_KEY=your_google_api_key_here
-CALENDAR_API_BASE_URL=http://127.0.0.1:8000
+GOOGLE_API_KEY=
+CALENDAR_API_BASE_URL=
+CALENDAR_INTERNAL_API_KEY=
+PROFILE_API_BASE_URL=
+PROFILE_INTERNAL_API_KEY=
+WEATHER_INTERNAL_API_KEY=
 ```
 
-`CALENDAR_API_BASE_URL` should point to your running calendar backend (`voice-scheduling-agent`) that exposes `GET /events`.
-
-## Integration
-This repository works with a companion service:
-
-- Weather orchestration service: `ai-weather-agent` (this repo)
-- Calendar/voice backend service: `voice-scheduling-agent`
-- Integration contract: weather graph reads meetings from `GET /events`
-- Runtime dependency: `CALENDAR_API_BASE_URL` must point to the voice backend URL
-
-This separation keeps scheduling concerns (voice + calendar writes) in one service and weather decisioning/orchestration in another.
-
 ## Run
-Weather agent:
-
+### Weather assistant entrypoint
 ```bash
 python main.py
 ```
 
-Meeting preview graph:
-
+### Graph runner
 ```bash
 python apps/graph/run_graph.py
 ```
 
-## Test
+### Internal API
+```bash
+python -m uvicorn apps.api.main:app --reload
+```
+
+## Tests
 ```bash
 python -m pytest -q
 ```
-
-## Next Progress
-- Replace mock profile JSON with real persisted user profile storage
-- Add dedicated tests for calendar loading + profile fallback integration
-- Extend risk scoring to event-time forecast instead of only current weather
-- Add API/graph observability metrics for production monitoring
