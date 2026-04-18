@@ -6,8 +6,9 @@ LangGraph-based weather decisioning service for meeting workflows.
 - Reads meetings from a calendar backend.
 - Filters in-person events.
 - Resolves weather city (event city or profile fallback).
-- Fetches weather from Open-Meteo.
+- Fetches event-time hourly weather from Open-Meteo.
 - Scores commute/weather risk per event.
+- Rewrites risk recommendations via structured LLM output with deterministic fallback.
 - Returns recommendations and summary payloads via internal API.
 
 ## Scope
@@ -33,6 +34,8 @@ It is designed to work with a companion backend (`voice-scheduling-agent`) that 
 - `apply_user_default_city`
 - `fetch_weather_for_events`
 - `score_event_weather_risk`
+- `add_high_risk_actions`
+- `llm_recommendation_rewrite`
 - `format_meeting_recommendations`
 
 Node implementations live in `apps/graph/nodes.py`.
@@ -47,12 +50,17 @@ Graph state contract: `apps/graph/state.py`.
 - Schemas: `apps/tools/schemas.py`
 
 ## Risk Scoring
-Current scoring is deterministic (rule-based):
+Core scoring is deterministic (rule-based):
 - `high`
 - `moderate`
 - `low`
 - `blocked` (missing location/city context)
 - `unknown` (weather unavailable)
+
+Recommendation text layer uses a structured LLM rewrite:
+- model: `google_genai:gemini-2.5-flash`
+- output contract: `LLMRecommendationsResponseSchema`
+- fallback: if LLM/validation fails, keep deterministic recommendations
 
 ## Internal API
 Defined in `apps/api/main.py`.
@@ -120,3 +128,8 @@ python -m uvicorn apps.api.main:app --reload
 ```bash
 python -m pytest -q
 ```
+
+## Current Status
+- Event-time hourly forecast scoring is enabled (`get_weather_by_city_at_iso` path).
+- High-risk conditional branch adds travel mitigation guidance.
+- Structured LLM recommendation rewrite is active with schema validation and fallback.
