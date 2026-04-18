@@ -4,11 +4,14 @@ from apps.graph.nodes import (
     filter_in_person_events,
     apply_user_default_city,
     add_high_risk_actions,
+    llm_recommendation_rewrite,
 )
 
 
 from langgraph.checkpoint.sqlite import SqliteSaver
 from apps.graph import workflows
+from apps.graph import nodes as nodes_module
+from apps.tools.schemas import LLMRecommendationsResponseSchema, LLMEventRecommendationSchema
 
 
 def _make_weather(weather_code: int, wind_speed_kmh: float, temperature_c: float) -> dict:
@@ -301,3 +304,49 @@ def test_add_high_risk_actions_no_change_when_no_high_risk() -> None:
     out = add_high_risk_actions(state)
 
     assert out["recommendations"] == ["Office Sync (Hamburg): low weather risk."]
+
+def test_llm_recommendation_rewrite_returns_structured_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeModel:
+        def invoke(self, _messages):
+            return LLMRecommendationsResponseSchema(
+                recommendations=[
+                    LLMEventRecommendationSchema(
+                        event_title="Site Survey",
+                        risk="moderate",
+                        reason="rain expected",
+                        actions=[],
+                    )
+                ]
+            )
+
+    monkeypatch.setattr(nodes_module, "LLM_REWRITE_MODEL", _FakeModel())
+
+    state = {
+        "risk_summary": [
+            {"event_title": "Site Survey", "city": "Berlin", "risk": "moderate", "reason": "rain expected"}
+        ],
+        "recommendations": ["fallback line"],
+    }
+
+    out = llm_recommendation_rewrite(state)
+    assert "Site Survey: moderate risk." in out["recommendations"][0]
+    assert "Reason: rain expected." in out["recommendations"][0]
+
+
+def test_llm_recommendation_rewrite_falls_back_when_model_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FailModel:
+        def invoke(self, _messages):
+            raise RuntimeError("model unavailable")
+
+    monkeypatch.setattr(nodes_module, "LLM_REWRITE_MODEL", _FailModel())
+
+    state = {
+        "risk_summary": [
+            {"event_title": "Client Visit", "city": "Hamburg", "risk": "high", "reason": "storm"}
+        ],
+        "recommendations": ["fallback recommendation"],
+    }
+
+    out = llm_recommendation_rewrite(state)
+    assert out["recommendations"] == ["fallback recommendation"]
+

@@ -8,6 +8,9 @@ from apps.tools.weather_client import (
     OpenMeteoClient,
     WeatherProviderError,
 )
+from pydantic import ValidationError
+from apps.tools.schemas import LLMRecommendationsResponseSchema
+
 
 from datetime import datetime, timedelta, timezone
 
@@ -17,7 +20,42 @@ from pathlib import Path
 import json
 from apps.tools.profile_client import ProfileClient, ProfileProviderError
 
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import HumanMessage, SystemMessage
+
+
 USER_PROFILES_PATH = Path(__file__).resolve().parents[2] / "data" / "user_profiles.json"
+
+
+LLM_REWRITE_MODEL = init_chat_model(
+    "google_genai:gemini-2.5-flash",
+    temperature=0,
+).with_structured_output(LLMRecommendationsResponseSchema)
+
+
+def _build_llm_rewrite_messages(risk_summary: list[dict], fallback: list[str]) -> list:
+    system = SystemMessage(
+        content=(
+            "You rewrite weather-risk results into concise actionable recommendations. "
+            "Return strictly structured output matching schema. "
+            "Keep risk labels exactly one of: low, moderate, high, blocked, unknown. "
+            "Do not invent events. Keep each reason short and specific."
+        )
+    )
+
+    human = HumanMessage(
+        content=json.dumps(
+            {
+                "risk_summary": risk_summary,
+                "existing_recommendations": fallback,
+            },
+            ensure_ascii=False,
+        )
+    )
+    return [system, human]
+
+
+
 
 def _get_user_default_city(user_id: str | None) -> str | None:
     if not user_id:
@@ -377,3 +415,47 @@ def add_high_risk_actions(state: GraphState) -> GraphState:
     )
     
     return {"recommendations": recommendations}
+
+
+
+def llm_recommendation_rewrite(state: GraphState) -> GraphState:
+    """
+    Explanation layer:
+    use LLM to rewrite deterministic risk_summary into concise recommendations.
+    Falls back to existing recommendations on any failure.
+    """
+    risk_summary = state.get("risk_summary") or []
+    fallback = list(state.get("recommendations") or [])
+    if not risk_summary:
+        return {"recommendations": fallback}
+
+    try:
+        messages = _build_llm_rewrite_messages(risk_summary, fallback)
+        validated = LLM_REWRITE_MODEL.invoke(messages)
+
+        rewritten = []
+        for rec in validated.recommendations:
+            reason = (rec.reason or "").strip().rstrip(".")
+            actions = [(a or "").strip().rstrip(".") for a in (rec.actions or []) if (a or "").strip()]
+
+            line = f"{rec.event_title}: {rec.risk} risk."
+            if reason:
+                line += f" Reason: {reason}."
+            if actions:
+                line += " Actions: " + "; ".join(actions) + "."
+            rewritten.append(line)
+            
+        # Preserve deterministic high-risk safety guidance from previous node.
+        carry_over = [
+            line for line in fallback
+            if "High-risk travel guidance" in line
+        ]
+        for line in carry_over:
+            if line not in rewritten:
+                rewritten.append(line)
+
+        return {"recommendations": rewritten or fallback}
+    except ValidationError:
+        return {"recommendations": fallback}
+    except Exception:
+        return {"recommendations": fallback}

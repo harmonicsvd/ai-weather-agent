@@ -1,4 +1,6 @@
 from pydantic import BaseModel, Field
+from typing import Literal
+
 
 
 class LocationSchema(BaseModel):
@@ -42,3 +44,14 @@ class CalendarEventSchema(BaseModel):
 
 class CalendarEventsResponseSchema(BaseModel):
     events: list[CalendarEventSchema] = Field(default_factory=list)
+
+
+class LLMEventRecommendationSchema(BaseModel):
+    event_title: str
+    risk: Literal["low", "moderate", "high", "blocked", "unknown"]
+    reason: str
+    actions: list[str] = Field(default_factory=list)
+
+
+class LLMRecommendationsResponseSchema(BaseModel):
+    recommendations: list[LLMEventRecommendationSchema] = Field(default_factory=list)

@@ -1,3 +1,4 @@
+
 from langgraph.graph import END, START, StateGraph
 
 from apps.graph.nodes import (
@@ -9,6 +10,7 @@ from apps.graph.nodes import (
     route_intent,
     fetch_weather_for_events,
     score_event_weather_risk,
+    llm_recommendation_rewrite,
     format_meeting_recommendations,
     apply_user_default_city,
     add_high_risk_actions,
@@ -89,6 +91,8 @@ def build_meeting_preview_graph(checkpointer=None):
     graph.add_node("format_meeting_recommendations", format_meeting_recommendations)
     graph.add_node("apply_user_default_city", apply_user_default_city)
     graph.add_node("add_high_risk_actions", add_high_risk_actions)
+    graph.add_node("llm_recommendation_rewrite", llm_recommendation_rewrite)
+
 
 
 
@@ -102,10 +106,12 @@ def build_meeting_preview_graph(checkpointer=None):
         route_after_risk_scoring,
         {
             "add_high_risk_actions": "add_high_risk_actions",
-            "format_meeting_recommendations": "format_meeting_recommendations",
+            "format_meeting_recommendations": "llm_recommendation_rewrite",
         },
     )
-    graph.add_edge("add_high_risk_actions", "format_meeting_recommendations")
+    graph.add_edge("add_high_risk_actions", "llm_recommendation_rewrite")
+    graph.add_edge("llm_recommendation_rewrite", "format_meeting_recommendations")
+
 
     graph.add_edge("format_meeting_recommendations", END)
 
