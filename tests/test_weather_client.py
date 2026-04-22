@@ -1,3 +1,5 @@
+"""Unit tests for OpenMeteoClient behavior and error mapping."""
+
 import pytest
 
 from apps.tools.schemas import (

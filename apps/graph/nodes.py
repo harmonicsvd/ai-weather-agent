@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+"""LangGraph node implementations for weather and meeting workflows."""
+
 import re
 
+# Node layer:
+# - Each function reads a subset of GraphState and returns only keys it updates.
+# - Keep network calls inside dedicated node/tool helpers to make tests easier.
 from apps.graph.state import GraphState
 from apps.tools.weather_client import (
     CityNotFoundError,
@@ -16,15 +21,11 @@ from datetime import datetime, timedelta, timezone
 
 from apps.tools.calendar_client import CalendarClient, CalendarProviderError
 
-from pathlib import Path
 import json
 from apps.tools.profile_client import ProfileClient, ProfileProviderError
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
-
-
-USER_PROFILES_PATH = Path(__file__).resolve().parents[2] / "data" / "user_profiles.json"
 
 
 LLM_REWRITE_MODEL = init_chat_model(
@@ -33,21 +34,62 @@ LLM_REWRITE_MODEL = init_chat_model(
 ).with_structured_output(LLMRecommendationsResponseSchema)
 
 
-def _build_llm_rewrite_messages(risk_summary: list[dict], fallback: list[str]) -> list:
-    system = SystemMessage(
-        content=(
-            "You rewrite weather-risk results into concise actionable recommendations. "
-            "Return strictly structured output matching schema. "
-            "Keep risk labels exactly one of: low, moderate, high, blocked, unknown. "
-            "Do not invent events. Keep each reason short and specific."
-        )
+def _build_system_prompt(user_profile: dict | None) -> str:
+    base = (
+        "You are an intelligent weather risk explainer. Your job is to take deterministic "
+        "weather risk scores and rewrite them into personalized, actionable advice.\n\n"
+        "SOURCE OF TRUTH: Risk levels (low/moderate/high/blocked/unknown) are final—do not change them.\n"
+        "YOUR ROLE: Explain WHY each risk matters and suggest PRACTICAL ACTIONS.\n\n"
+        "Output Rules:\n"
+        "- Return strictly structured output matching the schema.\n"
+        "- Keep risk labels exactly as: low, moderate, high, blocked, unknown.\n"
+        "- Do not invent events or weather data.\n"
+        "- Keep reasons short, specific, and actionable."
     )
+
+    if not user_profile:
+        return base
+
+    profile_context = (
+        "\n\nUser Context (use this to personalize recommendations):\n"
+    )
+    
+    role = user_profile.get("role")
+    if role:
+        profile_context += f"- Job/Role: {role}\n"
+    
+    commute_mode = user_profile.get("commute_mode")
+    if commute_mode:
+        profile_context += f"- How they commute: {commute_mode}\n"
+    
+    risk_tolerance = user_profile.get("risk_tolerance")
+    if risk_tolerance:
+        profile_context += f"- Risk tolerance: {risk_tolerance}\n"
+    
+    ppe_required = user_profile.get("ppe_required")
+    if ppe_required:
+        profile_context += f"- Requires protective equipment: Yes\n"
+
+    profile_context += (
+        "\nThink: How would weather impact THIS person given their job, commute, and risk preferences? "
+        "What actions would make sense for them specifically?"
+    )
+    
+    return base + profile_context
+
+def _build_llm_rewrite_messages(
+    risk_summary: list[dict],
+    fallback: list[str],
+    user_profile: dict | None = None,
+) -> list:
+    system = SystemMessage(content=_build_system_prompt(user_profile))
 
     human = HumanMessage(
         content=json.dumps(
             {
                 "risk_summary": risk_summary,
                 "existing_recommendations": fallback,
+                "user_profile": user_profile or {},
             },
             ensure_ascii=False,
         )
@@ -56,46 +98,33 @@ def _build_llm_rewrite_messages(risk_summary: list[dict], fallback: list[str]) -
 
 
 
-
-def _get_user_default_city(user_id: str | None) -> str | None:
-    if not user_id:
-        return None
-    try:
-        profiles = json.loads(USER_PROFILES_PATH.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
-    return (profiles.get(str(user_id)) or {}).get("default_city")
-
-
 def apply_user_default_city(state: GraphState) -> GraphState:
+    """
+    Ensure every in-person event has a weather city when possible.
+
+    Priority:
+    1) user_profile.default_city from internal profile API
+    2) leave missing so downstream can mark event as blocked
+    """
     events = state.get("in_person_events") or []
-    local_default_city = _get_user_default_city(state.get("user_id"))
+
+    user_profile = state.get("user_profile") or {}
+    profile_default_city = (user_profile.get("default_city") or "").strip() or None
+
     updated = []
+    for event in events:
+        if event.get("city"):
+            updated.append(event)
+            continue
 
-    with ProfileClient() as profile_client:
-        for event in events:
-            if event.get("city"):
-                updated.append(event)
-                continue
+        city = None
+        city_source = "missing"
 
-            city = None
-            city_source = "missing"
+        if profile_default_city:
+            city = profile_default_city
+            city_source = "profile_api"
 
-            user_sub = event.get("user_sub")
-            if user_sub:
-                try:
-                    profile = profile_client.get_profile_by_sub(user_sub)
-                    if profile and profile.default_city:
-                        city = profile.default_city
-                        city_source = "profile_api"
-                except ProfileProviderError:
-                    pass
-
-            if not city and local_default_city:
-                city = local_default_city
-                city_source = "user_default"
-
-            updated.append({**event, "city": city, "city_source": city_source})
+        updated.append({**event, "city": city, "city_source": city_source})
 
     return {"in_person_events": updated}
 
@@ -242,6 +271,7 @@ def load_calendar_events(state: GraphState) -> GraphState:
     return {"events": normalized, "error": None}
 
 def filter_in_person_events(state: GraphState) -> GraphState:
+    """Keep only in-person events for weather evaluation."""
     events = state.get("events") or []
     in_person_events = []
 
@@ -265,6 +295,11 @@ def filter_in_person_events(state: GraphState) -> GraphState:
 
 
 def fetch_weather_for_events(state: GraphState) -> GraphState:
+    """
+    For each in-person event:
+    - fetch weather near event time if city/time exist
+    - otherwise attach explicit reason so scoring can classify blocked/unknown
+    """
     events = state.get("in_person_events") or []
     if not events:
         return {"event_weather": []}
@@ -426,11 +461,12 @@ def llm_recommendation_rewrite(state: GraphState) -> GraphState:
     """
     risk_summary = state.get("risk_summary") or []
     fallback = list(state.get("recommendations") or [])
+    user_profile = state.get("user_profile")
     if not risk_summary:
         return {"recommendations": fallback}
 
     try:
-        messages = _build_llm_rewrite_messages(risk_summary, fallback)
+        messages = _build_llm_rewrite_messages(risk_summary, fallback, user_profile)
         validated = LLM_REWRITE_MODEL.invoke(messages)
 
         rewritten = []
@@ -444,8 +480,15 @@ def llm_recommendation_rewrite(state: GraphState) -> GraphState:
             if actions:
                 line += " Actions: " + "; ".join(actions) + "."
             rewritten.append(line)
+
+        if not rewritten:
+            print(
+                "LLM rewrite returned zero recommendations; using fallback. "
+                f"risk_items={len(risk_summary)}"
+            )
             
-        # Preserve deterministic high-risk safety guidance from previous node.
+        # Preserve deterministic high-risk safety guidance from previous node so
+        # critical safety advice is never dropped by rewrite formatting.
         carry_over = [
             line for line in fallback
             if "High-risk travel guidance" in line
@@ -455,7 +498,27 @@ def llm_recommendation_rewrite(state: GraphState) -> GraphState:
                 rewritten.append(line)
 
         return {"recommendations": rewritten or fallback}
-    except ValidationError:
+    except ValidationError as exc:
+        print(f"LLM rewrite validation failed; using fallback. details={exc}")
         return {"recommendations": fallback}
-    except Exception:
+    except Exception as exc:
+        print(f"LLM rewrite failed; using fallback. error={repr(exc)}")
         return {"recommendations": fallback}
+
+
+# Load profile data for personalization and city fallback logic.
+def load_user_profile(state: GraphState) -> GraphState:
+    user_sub = state.get("user_sub")
+    if not user_sub:
+        return {"user_profile": None}
+
+    try:
+        with ProfileClient() as profile_client:
+            profile = profile_client.get_profile_by_sub(user_sub)
+        if profile:
+            return {"user_profile": profile.model_dump()}
+        return {"user_profile": None}
+    except ProfileProviderError as exc:
+        # keep fallback behavior, but make failure visible in logs
+        print(f"Profile load failed for sub={user_sub}: {exc}")
+        return {"user_profile": None}

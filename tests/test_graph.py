@@ -1,4 +1,7 @@
+"""Unit tests for graph nodes and routing behavior."""
+
 import pytest
+
 from apps.graph.nodes import (
     score_event_weather_risk,
     filter_in_person_events,
@@ -161,25 +164,10 @@ def test_online_events_are_excluded_from_in_person_filter() -> None:
     assert titles == ["Office Meet"]
 
 
-def test_apply_user_default_city_uses_profile_api(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _FakeProfile:
-        default_city = "Hamburg"
-
-    class _FakeProfileClient:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return None
-
-        def get_profile_by_sub(self, sub: str):
-            assert sub == "104659023322141767006"
-            return _FakeProfile()
-
-    monkeypatch.setattr("apps.graph.nodes.ProfileClient", _FakeProfileClient)
-
+def test_apply_user_default_city_uses_profile_api() -> None:
     state = {
         "user_id": "1",
+        "user_profile": {"default_city": "Hamburg"},
         "in_person_events": [
             {"title": "Client Visit", "city": None, "user_sub": "104659023322141767006"}
         ],
@@ -190,50 +178,10 @@ def test_apply_user_default_city_uses_profile_api(monkeypatch: pytest.MonkeyPatc
     assert updated["city"] == "Hamburg"
     assert updated["city_source"] == "profile_api"
 
-
-def test_apply_user_default_city_falls_back_to_local_default(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _FakeProfileClient:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return None
-
-        def get_profile_by_sub(self, sub: str):
-            return None
-
-    monkeypatch.setattr("apps.graph.nodes.ProfileClient", _FakeProfileClient)
-    monkeypatch.setattr("apps.graph.nodes._get_user_default_city", lambda user_id: "Berlin")
-
+def test_apply_user_default_city_marks_missing_when_no_profile() -> None:
     state = {
         "user_id": "1",
-        "in_person_events": [{"title": "Site Visit", "city": None, "user_sub": "x"}],
-    }
-
-    result = apply_user_default_city(state)
-    updated = result["in_person_events"][0]
-    assert updated["city"] == "Berlin"
-    assert updated["city_source"] == "user_default"
-
-
-def test_apply_user_default_city_marks_missing_when_no_profile_or_default(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _FakeProfileClient:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return None
-
-        def get_profile_by_sub(self, sub: str):
-            return None
-
-    monkeypatch.setattr("apps.graph.nodes.ProfileClient", _FakeProfileClient)
-    monkeypatch.setattr("apps.graph.nodes._get_user_default_city", lambda user_id: None)
-
-    state = {
-        "user_id": "1",
+        "user_profile": None,
         "in_person_events": [{"title": "Site Visit", "city": None, "user_sub": "x"}],
     }
 
@@ -241,7 +189,6 @@ def test_apply_user_default_city_marks_missing_when_no_profile_or_default(
     updated = result["in_person_events"][0]
     assert updated["city"] is None
     assert updated["city_source"] == "missing"
-
 
 def test_score_event_weather_risk_blocked_for_missing_event_time():
     state = {
@@ -349,4 +296,3 @@ def test_llm_recommendation_rewrite_falls_back_when_model_fails(monkeypatch: pyt
 
     out = llm_recommendation_rewrite(state)
     assert out["recommendations"] == ["fallback recommendation"]
-

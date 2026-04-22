@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""HTTP client that fetches user profile data from voice-agent."""
+
 import os
 from pathlib import Path
 from typing import Any
@@ -16,13 +18,17 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env", override=F
 class ProfileProviderError(Exception):
     """Raised when internal profile API call/response is invalid."""
 
-
 class UserProfileSchema(BaseModel):
     sub: str
     email: str
     default_city: str
     timezone: str
     updated_at: str
+    # NEW FIELDS - add these:
+    role: str | None = None              # "contractor", "architect", "manager", "developer"
+    commute_mode: str | None = None      # "car", "public_transport", "bike", "walk"
+    ppe_required: bool = False           # hard hat, safety vest, etc.
+    risk_tolerance: str | None = None    # "low", "medium", "high"
 
 
 class InternalProfileResponseSchema(BaseModel):
@@ -30,6 +36,8 @@ class InternalProfileResponseSchema(BaseModel):
 
 
 class ProfileClient:
+    """HTTP client for voice backend `/internal/profile/{sub}` endpoint."""
+
     def __init__(
         self,
         base_url: str | None = None,
@@ -67,6 +75,7 @@ class ProfileClient:
         return response.json()
 
     def get_profile_by_sub(self, sub: str) -> UserProfileSchema | None:
+        """Fetch one profile; returns None on 404 (profile not created yet)."""
         try:
             payload = self._request_json(f"/internal/profile/{sub}")
             validated = InternalProfileResponseSchema.model_validate(payload)

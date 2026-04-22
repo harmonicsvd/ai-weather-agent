@@ -1,3 +1,5 @@
+"""Pydantic schemas shared across weather tools, graph, and API boundaries."""
+
 from pydantic import BaseModel, Field
 from typing import Literal
 

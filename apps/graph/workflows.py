@@ -1,4 +1,6 @@
 
+"""Graph assembly layer: wires nodes and routing edges into runnable apps."""
+
 from langgraph.graph import END, START, StateGraph
 
 from apps.graph.nodes import (
@@ -14,6 +16,7 @@ from apps.graph.nodes import (
     format_meeting_recommendations,
     apply_user_default_city,
     add_high_risk_actions,
+    load_user_profile
     
 )
 
@@ -21,9 +24,12 @@ from apps.graph.state import GraphState
 
 
 def route_after_risk_scoring(state: GraphState) -> str:
+    """
+    Decide whether to inject fixed high-risk safety guidance before LLM rewrite.
+    """
     risk_summary = state.get("risk_summary") or []
     has_high_risk = any(item.get("risk") == "high" for item in risk_summary)
-    return "add_high_risk_actions" if has_high_risk else "format_meeting_recommendations"
+    return "add_high_risk_actions" if has_high_risk else "llm_recommendation_rewrite"
 
 
 def route_after_intent(state: GraphState) -> str:
@@ -82,6 +88,11 @@ def build_weather_graph(checkpointer=None):
     return graph.compile(checkpointer=checkpointer)
 
 def build_meeting_preview_graph(checkpointer=None):
+    """
+    Meeting preview flow:
+    calendar -> in-person filter -> profile -> city fallback -> weather -> scoring
+    -> (optional fixed high-risk add-on) -> LLM rewrite -> final formatting
+    """
     graph = StateGraph(GraphState)
 
     graph.add_node("load_calendar_events", load_calendar_events)
@@ -92,21 +103,24 @@ def build_meeting_preview_graph(checkpointer=None):
     graph.add_node("apply_user_default_city", apply_user_default_city)
     graph.add_node("add_high_risk_actions", add_high_risk_actions)
     graph.add_node("llm_recommendation_rewrite", llm_recommendation_rewrite)
+    graph.add_node("load_user_profile", load_user_profile)
 
 
 
 
     graph.add_edge(START, "load_calendar_events")
     graph.add_edge("load_calendar_events", "filter_in_person_events")
-    graph.add_edge("filter_in_person_events", "apply_user_default_city")
+    graph.add_edge("filter_in_person_events", "load_user_profile")
+    graph.add_edge("load_user_profile", "apply_user_default_city")
     graph.add_edge("apply_user_default_city", "fetch_weather_for_events")
+
     graph.add_edge("fetch_weather_for_events", "score_event_weather_risk")
     graph.add_conditional_edges(
         "score_event_weather_risk",
         route_after_risk_scoring,
         {
             "add_high_risk_actions": "add_high_risk_actions",
-            "format_meeting_recommendations": "llm_recommendation_rewrite",
+            "llm_recommendation_rewrite": "llm_recommendation_rewrite",
         },
     )
     graph.add_edge("add_high_risk_actions", "llm_recommendation_rewrite")

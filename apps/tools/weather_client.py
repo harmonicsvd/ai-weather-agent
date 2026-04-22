@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Open-Meteo API client with retries, validation, and event-time weather lookup."""
+
 from typing import Any
 
 import httpx
@@ -157,6 +159,7 @@ class OpenMeteoClient:
     def get_weather_at_iso(self, lat: float, lon: float, target_iso: str) -> CurrentWeatherSchema:
         """
         Fetch hourly weather and select the closest point to target datetime (UTC).
+        We do not poll every hour ourselves; this picks one point from provider data.
         """
         target_utc = self._parse_iso_to_utc(target_iso)
         target_date = target_utc.date().isoformat()
@@ -188,6 +191,7 @@ class OpenMeteoClient:
             except ValueError:
                 continue
 
+            # Choose nearest forecast bucket to the meeting time.
             diff = abs((point_utc - target_utc).total_seconds())
             if closest_diff_seconds is None or diff < closest_diff_seconds:
                 closest_diff_seconds = diff

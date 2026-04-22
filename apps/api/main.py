@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+"""Internal API facade for the weather LangGraph workflow."""
+
 import hmac
 import os
 from datetime import datetime, timedelta, timezone, time as dt_time
@@ -22,6 +24,7 @@ app = FastAPI(title="Weather Agent Internal API")
 
 
 def require_internal_api_key(x_internal_api_key: str | None):
+    # Internal endpoint guard: backend-to-backend only.
     if not WEATHER_INTERNAL_API_KEY:
         return JSONResponse({"error": "WEATHER_INTERNAL_API_KEY is not configured"}, status_code=500)
     if not x_internal_api_key or not hmac.compare_digest(x_internal_api_key, WEATHER_INTERNAL_API_KEY):
@@ -135,6 +138,10 @@ def internal_meeting_weather_summary(
     tz: str = Query(default="Europe/Berlin", description="IANA timezone"),
     x_internal_api_key: str | None = Header(default=None),
 ):
+    """
+    Backend endpoint consumed by voice-scheduling-agent.
+    It runs the LangGraph pipeline and returns summary + structured details.
+    """
     err = require_internal_api_key(x_internal_api_key)
     if err:
         return err

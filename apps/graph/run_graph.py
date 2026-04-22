@@ -1,3 +1,5 @@
+"""Local CLI runner for quickly testing the meeting preview graph."""
+
 from langgraph.checkpoint.sqlite import SqliteSaver
 from pathlib import Path
 import sys
@@ -16,6 +18,7 @@ from apps.graph.workflows import build_meeting_preview_graph
 
 
 def run_case(user_query: str, user_id: str, label: str) -> None:
+    # Local debug runner: executes one graph call and prints key state outputs.
     db_path = PROJECT_ROOT / "data" / "checkpoints.sqlite"
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -24,9 +27,11 @@ def run_case(user_query: str, user_id: str, label: str) -> None:
 
         config = {"configurable": {"thread_id": f"meeting-{user_id}"}}
         result = app.invoke(
+            
             {
                 "user_query": user_query,
                 "user_id": user_id,
+                "user_sub": "104659023322141767006"  # Add this for profile lookup
             },
             config=config,
         )
@@ -48,4 +53,9 @@ def run_case(user_query: str, user_id: str, label: str) -> None:
 
 
 if __name__ == "__main__":
-    run_case("What are my meetings today?", "2", "meeting-preview")
+    run_case(
+        user_query="What are my meetings tomorrow?",
+        user_id="1", # Add this for profile lookup
+        label="meeting-preview-test"
+    )
+    

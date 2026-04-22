@@ -1,3 +1,5 @@
+"""Standalone demo entrypoint for a tool-calling weather agent."""
+
 from dataclasses import dataclass
 from pathlib import Path
 

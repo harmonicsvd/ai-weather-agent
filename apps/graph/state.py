@@ -1,5 +1,7 @@
 from typing import Literal, TypedDict
 
+"""Shared typed state contract for LangGraph nodes."""
+
 from apps.tools.schemas import WeatherByCityResponseSchema
 
 
@@ -38,3 +40,5 @@ class GraphState(TypedDict, total=False):
 
     event_weather: list[dict] | None
     risk_summary: list[dict] | None
+
+    user_profile: dict | None

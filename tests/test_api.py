@@ -1,3 +1,5 @@
+"""API-level tests for weather-agent internal summary endpoint."""
+
 from fastapi.testclient import TestClient
 import pytest
 
