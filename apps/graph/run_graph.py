@@ -18,6 +18,12 @@ from apps.graph.workflows import build_meeting_preview_graph
 
 
 def run_case(user_query: str, user_id: str, label: str) -> None:
+    """
+    Execute one graph run and print intermediate fields for debugging.
+
+    Helpful for validating routing decisions, profile/city behavior, and
+    recommendation output before testing through HTTP endpoints.
+    """
     # Local debug runner: executes one graph call and prints key state outputs.
     db_path = PROJECT_ROOT / "data" / "checkpoints.sqlite"
     db_path.parent.mkdir(parents=True, exist_ok=True)

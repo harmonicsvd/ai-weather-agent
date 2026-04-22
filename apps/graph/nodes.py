@@ -35,6 +35,12 @@ LLM_REWRITE_MODEL = init_chat_model(
 
 
 def _build_system_prompt(user_profile: dict | None) -> str:
+    """
+    Build LLM system instructions for recommendation rewriting.
+
+    We keep risk classification deterministic (already scored) and ask the model
+    only for explanation + actions, optionally personalized with profile fields.
+    """
     base = (
         "You are an intelligent weather risk explainer. Your job is to take deterministic "
         "weather risk scores and rewrite them into personalized, actionable advice.\n\n"
@@ -82,6 +88,7 @@ def _build_llm_rewrite_messages(
     fallback: list[str],
     user_profile: dict | None = None,
 ) -> list:
+    """Package deterministic state into chat messages for structured LLM output."""
     system = SystemMessage(content=_build_system_prompt(user_profile))
 
     human = HumanMessage(
@@ -508,6 +515,13 @@ def llm_recommendation_rewrite(state: GraphState) -> GraphState:
 
 # Load profile data for personalization and city fallback logic.
 def load_user_profile(state: GraphState) -> GraphState:
+    """
+    Fetch user profile once and store in graph state.
+
+    Downstream nodes use this for:
+    - default city fallback (`apply_user_default_city`)
+    - personalized recommendation prompt context
+    """
     user_sub = state.get("user_sub")
     if not user_sub:
         return {"user_profile": None}

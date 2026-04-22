@@ -1,4 +1,16 @@
 {
-  "1": { "default_city": "Berlin" },
-  "2": { "default_city": "Hamburg" }
+  "1": {
+    "default_city": "Berlin",
+    "role": "construction_contractor",
+    "commute_mode": "bike",
+    "ppe_required": true,
+    "risk_tolerance": "low"
+  },
+  "2": {
+    "default_city": "Hamburg",
+    "role": "office_architect",
+    "commute_mode": "car",
+    "ppe_required": false,
+    "risk_tolerance": "high"
+  }
 }

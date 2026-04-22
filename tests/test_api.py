@@ -8,12 +8,14 @@ from apps.api import main as api_main
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch):
+    """Test client fixture with deterministic internal API key override."""
     monkeypatch.setattr(api_main, "WEATHER_INTERNAL_API_KEY", "test-weather-key")
     with TestClient(api_main.app) as c:
         yield c
 
 
 def test_internal_meeting_weather_summary_requires_internal_key(client: TestClient) -> None:
+    """Internal summary endpoint must reject calls without auth header."""
     response = client.get(
         "/internal/meeting-weather-summary",
         params={"user_sub": "u1", "date": "2026-04-15", "tz": "Europe/Berlin"},
@@ -26,6 +28,7 @@ def test_internal_meeting_weather_summary_returns_graph_derived_payload(
     monkeypatch: pytest.MonkeyPatch,
     client: TestClient,
 ) -> None:
+    """Endpoint should map graph output into stable API summary contract."""
     class _FakeGraph:
         def invoke(self, _state):
             return {

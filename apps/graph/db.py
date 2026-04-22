@@ -4,6 +4,7 @@ import sqlite3
 import os
 
 def get_db():
+    """Open SQLite connection to voice-agent DB with dict-like row access."""
     # Assume the DB is in the voice-scheduling-agent directory
     db_path = os.path.join(os.path.dirname(__file__), '../../../voice-scheduling-agent/app.db')
     conn = sqlite3.connect(db_path)

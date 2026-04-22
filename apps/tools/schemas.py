@@ -33,6 +33,7 @@ class WeatherByCityResponseSchema(BaseModel):
     current_weather: CurrentWeatherSchema
     
 class CalendarEventSchema(BaseModel):
+    """Normalized calendar event fields consumed by graph nodes."""
     title: str
     start: str | None = None
     end: str | None = None
@@ -45,10 +46,12 @@ class CalendarEventSchema(BaseModel):
 
 
 class CalendarEventsResponseSchema(BaseModel):
+    """Response envelope for calendar list endpoint."""
     events: list[CalendarEventSchema] = Field(default_factory=list)
 
 
 class LLMEventRecommendationSchema(BaseModel):
+    """One event-level explanation item produced by structured LLM output."""
     event_title: str
     risk: Literal["low", "moderate", "high", "blocked", "unknown"]
     reason: str
@@ -56,4 +59,5 @@ class LLMEventRecommendationSchema(BaseModel):
 
 
 class LLMRecommendationsResponseSchema(BaseModel):
+    """Container of structured recommendations returned by LLM rewrite node."""
     recommendations: list[LLMEventRecommendationSchema] = Field(default_factory=list)

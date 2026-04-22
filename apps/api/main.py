@@ -24,6 +24,13 @@ app = FastAPI(title="Weather Agent Internal API")
 
 
 def require_internal_api_key(x_internal_api_key: str | None):
+    """
+    Validate backend-to-backend auth header for internal weather endpoints.
+
+    Returns:
+    - JSONResponse error object when key is missing/invalid
+    - None when key is valid
+    """
     # Internal endpoint guard: backend-to-backend only.
     if not WEATHER_INTERNAL_API_KEY:
         return JSONResponse({"error": "WEATHER_INTERNAL_API_KEY is not configured"}, status_code=500)
@@ -33,10 +40,17 @@ def require_internal_api_key(x_internal_api_key: str | None):
 
 
 def _to_utc_iso_z(dt: datetime) -> str:
+    """Format timezone-aware datetime as canonical UTC `...Z` string."""
     return dt.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _day_window_utc(target_date: str | None, timezone_name: str) -> tuple[str, str, str, str]:
+    """
+    Resolve a local day into a UTC `[from_iso, to_iso)` query window.
+
+    This keeps "today" semantics correct for the user's timezone while querying
+    calendar APIs that expect UTC timestamps.
+    """
     try:
         tz = ZoneInfo(timezone_name)
         resolved_tz = timezone_name
@@ -61,6 +75,13 @@ def _day_window_utc(target_date: str | None, timezone_name: str) -> tuple[str, s
 
 
 def _is_in_person_event(event: dict) -> bool:
+    """
+    Normalize event mode classification with backward-compatible heuristics.
+
+    Priority:
+    1) explicit `meeting_mode`
+    2) fallback to inverse of `is_virtual` for legacy rows
+    """
     mode = (event.get("meeting_mode") or "unknown").strip().lower()
     if mode == "in_person":
         return True
@@ -70,6 +91,7 @@ def _is_in_person_event(event: dict) -> bool:
 
 
 def _format_event_time(start_value: str | None, timezone_name: str) -> str:
+    """Render an ISO datetime as `HH:MM` in the requested timezone."""
     if not start_value:
         return "unknown time"
     try:
@@ -84,6 +106,12 @@ def _format_event_time(start_value: str | None, timezone_name: str) -> str:
 
 
 def _build_summary_payload(result: dict, user_sub: str, resolved_date: str, resolved_tz: str) -> dict:
+    """
+    Convert raw graph state output into stable API response contract.
+
+    The voice backend depends on this shape (`counts`, `summary_text`, etc.),
+    so this helper keeps that mapping centralized.
+    """
     events = result.get("events") or []
     in_person_events = result.get("in_person_events") or []
     online_events = [event for event in events if not _is_in_person_event(event)]
@@ -128,6 +156,7 @@ def _build_summary_payload(result: dict, user_sub: str, resolved_date: str, reso
 
 @app.get("/health")
 def health():
+    """Minimal liveness probe for orchestration platforms and local checks."""
     return {"ok": True}
 
 

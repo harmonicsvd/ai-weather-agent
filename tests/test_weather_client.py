@@ -15,6 +15,7 @@ from apps.tools.weather_client import (
 
 
 def test_geocode_city_returns_location_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    """geocode_city should return typed LocationSchema on successful provider response."""
     with OpenMeteoClient() as client:
         monkeypatch.setattr(
             client,
@@ -39,6 +40,7 @@ def test_geocode_city_returns_location_schema(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_geocode_city_raises_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Empty geocode results should raise CityNotFoundError."""
     with OpenMeteoClient() as client:
         monkeypatch.setattr(client, "_get_json", lambda url, params: {"results": []})
 
@@ -47,12 +49,14 @@ def test_geocode_city_raises_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_geocode_city_raises_on_empty_input() -> None:
+    """Blank city input must fail fast with ValueError."""
     with OpenMeteoClient() as client:
         with pytest.raises(ValueError, match="city must not be empty"):
             client.geocode_city("   ")
 
 
 def test_get_current_weather_returns_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Current weather payload should be parsed into CurrentWeatherSchema."""
     with OpenMeteoClient() as client:
         monkeypatch.setattr(
             client,
@@ -79,6 +83,7 @@ def test_get_current_weather_returns_schema(monkeypatch: pytest.MonkeyPatch) -> 
 def test_get_current_weather_raises_provider_error_for_missing_current(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Missing `current` section should surface as WeatherProviderError."""
     with OpenMeteoClient() as client:
         monkeypatch.setattr(client, "_get_json", lambda url, params: {"hourly": {}})
 
@@ -92,6 +97,7 @@ def test_get_current_weather_raises_provider_error_for_missing_current(
 def test_get_current_weather_by_city_returns_typed_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """High-level city weather call should return typed top-level schema."""
     with OpenMeteoClient() as client:
         monkeypatch.setattr(
             client,

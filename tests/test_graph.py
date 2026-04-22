@@ -18,6 +18,7 @@ from apps.tools.schemas import LLMRecommendationsResponseSchema, LLMEventRecomme
 
 
 def _make_weather(weather_code: int, wind_speed_kmh: float, temperature_c: float) -> dict:
+    """Build compact weather payload used by risk-scoring unit tests."""
     return {
         "location": {
             "name": "Test City",
@@ -38,6 +39,7 @@ def _make_weather(weather_code: int, wind_speed_kmh: float, temperature_c: float
 
 
 def test_score_event_weather_risk_high_moderate_low() -> None:
+    """Risk scoring should classify high/moderate/low based on code/wind thresholds."""
     state = {
         "event_weather": [
             {
@@ -66,6 +68,7 @@ def test_score_event_weather_risk_high_moderate_low() -> None:
 
 
 def test_score_event_weather_risk_handles_unavailable_weather() -> None:
+    """Missing weather payload should produce `unknown` risk and fallback message."""
     state = {
         "event_weather": [
             {"event": {"title": "Unknown Event", "city": "Nowhere"}, "weather": None}
@@ -79,6 +82,7 @@ def test_score_event_weather_risk_handles_unavailable_weather() -> None:
     
     
 def _fake_fetch_weather_for_events(state):
+    """Deterministic fake weather node used for checkpoint-history test."""
     events = state.get("in_person_events") or []
     event_weather = []
     for event in events:
@@ -102,6 +106,7 @@ def _fake_fetch_weather_for_events(state):
 
 
 def test_meeting_graph_checkpoint_history_grows(tmp_path, monkeypatch):
+    """Repeated invokes on same thread should append checkpoint history."""
     monkeypatch.setattr(workflows, "fetch_weather_for_events", _fake_fetch_weather_for_events)
 
     db_path = tmp_path / "checkpoints.sqlite"
@@ -120,6 +125,7 @@ def test_meeting_graph_checkpoint_history_grows(tmp_path, monkeypatch):
     assert second > first
     
 def test_in_person_with_location_risk_is_computed() -> None:
+    """In-person events with weather data should never be marked blocked."""
     state = {
         "event_weather": [
             {
@@ -135,6 +141,7 @@ def test_in_person_with_location_risk_is_computed() -> None:
 
 
 def test_missing_location_is_blocked() -> None:
+    """Missing city/location should be classified as blocked with guidance text."""
     state = {
         "event_weather": [
             {
@@ -152,6 +159,7 @@ def test_missing_location_is_blocked() -> None:
 
 
 def test_online_events_are_excluded_from_in_person_filter() -> None:
+    """Filter node should keep only in-person events for weather evaluation."""
     state = {
         "events": [
             {"title": "Online Sync", "meeting_mode": "online", "is_virtual": True},
@@ -165,6 +173,7 @@ def test_online_events_are_excluded_from_in_person_filter() -> None:
 
 
 def test_apply_user_default_city_uses_profile_api() -> None:
+    """Profile default city should populate events that lack explicit city."""
     state = {
         "user_id": "1",
         "user_profile": {"default_city": "Hamburg"},
@@ -179,6 +188,7 @@ def test_apply_user_default_city_uses_profile_api() -> None:
     assert updated["city_source"] == "profile_api"
 
 def test_apply_user_default_city_marks_missing_when_no_profile() -> None:
+    """Without profile default city, event city should remain missing."""
     state = {
         "user_id": "1",
         "user_profile": None,
@@ -191,6 +201,7 @@ def test_apply_user_default_city_marks_missing_when_no_profile() -> None:
     assert updated["city_source"] == "missing"
 
 def test_score_event_weather_risk_blocked_for_missing_event_time():
+    """Missing event time should produce blocked risk and clear explanation."""
     state = {
         "event_weather": [
             {
@@ -209,6 +220,7 @@ def test_score_event_weather_risk_blocked_for_missing_event_time():
 
 
 def test_score_event_weather_risk_blocked_for_invalid_event_time():
+    """Invalid event-time format should produce blocked risk classification."""
     state = {
         "event_weather": [
             {
@@ -227,6 +239,7 @@ def test_score_event_weather_risk_blocked_for_invalid_event_time():
 
 
 def test_add_high_risk_actions_appends_guidance() -> None:
+    """High-risk events should get extra deterministic travel guidance line."""
     state = {
         "risk_summary": [
             {"event_title": "Site Visit", "risk": "high", "city": "Berlin"}
@@ -241,6 +254,7 @@ def test_add_high_risk_actions_appends_guidance() -> None:
 
 
 def test_add_high_risk_actions_no_change_when_no_high_risk() -> None:
+    """No high-risk items means recommendations should pass through unchanged."""
     state = {
         "risk_summary": [
             {"event_title": "Office Sync", "risk": "low", "city": "Hamburg"}
@@ -253,6 +267,7 @@ def test_add_high_risk_actions_no_change_when_no_high_risk() -> None:
     assert out["recommendations"] == ["Office Sync (Hamburg): low weather risk."]
 
 def test_llm_recommendation_rewrite_returns_structured_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LLM rewrite should map structured response into user-facing text lines."""
     class _FakeModel:
         def invoke(self, _messages):
             return LLMRecommendationsResponseSchema(
@@ -281,6 +296,7 @@ def test_llm_recommendation_rewrite_returns_structured_lines(monkeypatch: pytest
 
 
 def test_llm_recommendation_rewrite_falls_back_when_model_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Any model failure should fall back to deterministic recommendations."""
     class _FailModel:
         def invoke(self, _messages):
             raise RuntimeError("model unavailable")

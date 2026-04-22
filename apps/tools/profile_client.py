@@ -19,6 +19,11 @@ class ProfileProviderError(Exception):
     """Raised when internal profile API call/response is invalid."""
 
 class UserProfileSchema(BaseModel):
+    """
+    Normalized profile shape returned by voice-agent internal profile endpoint.
+
+    Includes optional personalization fields used by LLM recommendation rewrite.
+    """
     sub: str
     email: str
     default_city: str
@@ -32,6 +37,7 @@ class UserProfileSchema(BaseModel):
 
 
 class InternalProfileResponseSchema(BaseModel):
+    """Envelope contract for `/internal/profile/{sub}` responses."""
     profile: UserProfileSchema
 
 
