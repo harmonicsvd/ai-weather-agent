@@ -34,6 +34,7 @@ class OpenMeteoClient:
     """Small wrapper around Open-Meteo APIs with retries and error mapping."""
 
     def __init__(self, timeout_seconds: float = 10.0) -> None:
+        """Create the reusable HTTP client shared by all weather requests."""
         # Reuse one HTTP client for connection pooling and shared configuration.
         self._client = httpx.Client(
             timeout=timeout_seconds,
@@ -45,11 +46,13 @@ class OpenMeteoClient:
         self._client.close()
 
     def __enter__(self) -> "OpenMeteoClient":
+        """Return self so callers can use the client inside a `with` block."""
         # Enables: `with OpenMeteoClient() as client: ...`
         # Returning self gives caller access to all instance methods.
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Always close the HTTP client when leaving the context manager."""
         # Always close underlying connections, even if an exception occurs.
         self.close()
 
@@ -150,6 +153,7 @@ class OpenMeteoClient:
 
     @staticmethod
     def _parse_iso_to_utc(value: str) -> datetime:
+        """Normalize ISO timestamps into timezone-aware UTC datetimes."""
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
@@ -202,6 +206,7 @@ class OpenMeteoClient:
             raise WeatherProviderError("Hourly weather data is invalid in provider response.")
 
         def _value(key: str):
+            """Read one hourly series at the selected closest forecast index."""
             series = hourly.get(key) or []
             return series[closest_index] if closest_index < len(series) else None
 

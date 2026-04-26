@@ -3,6 +3,7 @@ from __future__ import annotations
 """Internal API facade for the weather LangGraph workflow."""
 
 import hmac
+import time
 import os
 from datetime import datetime, timedelta, timezone, time as dt_time
 from pathlib import Path
@@ -177,6 +178,9 @@ def internal_meeting_weather_summary(
 
     try:
         from_iso, to_iso, resolved_date, resolved_tz = _day_window_utc(date, tz)
+        request_started_at_monotonic = time.monotonic()
+        llm_budget_seconds = 6.0
+        llm_min_time_remaining_seconds = 1.5
         result = MEETING_PREVIEW_APP.invoke(
             {
                 "user_query": f"What are my meetings on {resolved_date}?",
@@ -186,8 +190,12 @@ def internal_meeting_weather_summary(
                 "to_iso": to_iso,
                 "timezone": resolved_tz,
                 "target_date": resolved_date,
+                "request_started_at_monotonic": request_started_at_monotonic,
+                "llm_deadline_monotonic": request_started_at_monotonic + llm_budget_seconds,
+                "llm_min_time_remaining_seconds": llm_min_time_remaining_seconds,
             }
         )
+
         payload = _build_summary_payload(result, user_sub, resolved_date, resolved_tz)
         if result.get("error"):
             payload["error"] = result["error"]

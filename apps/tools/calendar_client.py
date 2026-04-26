@@ -24,18 +24,22 @@ class CalendarProviderError(Exception):
 class CalendarClient:
     """HTTP client for voice backend `/internal/events` endpoint."""
 
-    def __init__(self, base_url: str | None = None, timeout_seconds: float = 10.0) -> None:
+    def __init__(self, base_url: str | None = None, timeout_seconds: float = 30.0) -> None:
+        """Create one reusable HTTP client with env-driven auth configuration."""
         self.base_url = (base_url or os.getenv("CALENDAR_API_BASE_URL", "http://127.0.0.1:8000")).rstrip("/")
         self.internal_api_key = os.getenv("CALENDAR_INTERNAL_API_KEY", "")
         self._client = httpx.Client(timeout=timeout_seconds)
 
     def __enter__(self) -> "CalendarClient":
+        """Allow `with CalendarClient() as client:` usage in calling code."""
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
+        """Close the underlying HTTP client when the context block exits."""
         self.close()
 
     def close(self) -> None:
+        """Release sockets/resources held by the reusable HTTP client."""
         self._client.close()
 
     @retry(
@@ -45,6 +49,7 @@ class CalendarClient:
         retry=retry_if_exception_type((httpx.TimeoutException, httpx.TransportError)),
     )
     def _request_json(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Send one authenticated GET request and return decoded JSON."""
         headers = {}
         if self.internal_api_key:
             headers["X-Internal-API-Key"] = self.internal_api_key

@@ -3,6 +3,10 @@ from __future__ import annotations
 """LangGraph node implementations for weather and meeting workflows."""
 
 import re
+import time
+import math
+
+
 
 # Node layer:
 # - Each function reads a subset of GraphState and returns only keys it updates.
@@ -32,6 +36,51 @@ LLM_REWRITE_MODEL = init_chat_model(
     "google_genai:gemini-2.5-flash",
     temperature=0,
 ).with_structured_output(LLMRecommendationsResponseSchema)
+
+
+# Keep retries small so API latency stays within webhook limits.
+LLM_REWRITE_MAX_ATTEMPTS = 2
+LLM_REWRITE_BASE_SLEEP_SECONDS = 0.7
+
+
+def _is_retryable_llm_error(exc: Exception) -> bool:
+    """Decide whether an LLM failure is transient enough to try again."""
+    msg = str(exc).lower()
+    retry_markers = (
+        "503",
+        "unavailable",
+        "resource_exhausted",
+        "timed out",
+        "timeout",
+        "deadline exceeded",
+    )
+    return any(marker in msg for marker in retry_markers)
+
+
+def _invoke_rewrite_model_with_retry(messages):
+    """Call the rewrite model with small bounded retries for transient failures."""
+    last_exc: Exception | None = None
+
+    for attempt in range(1, LLM_REWRITE_MAX_ATTEMPTS + 1):
+        try:
+            return LLM_REWRITE_MODEL.invoke(messages)
+        except Exception as exc:
+            last_exc = exc
+            should_retry = _is_retryable_llm_error(exc)
+            is_last = attempt == LLM_REWRITE_MAX_ATTEMPTS
+
+            if (not should_retry) or is_last:
+                raise
+
+            wait_s = LLM_REWRITE_BASE_SLEEP_SECONDS * (2 ** (attempt - 1))
+            print(
+                f"LLM rewrite transient failure (attempt {attempt}/{LLM_REWRITE_MAX_ATTEMPTS}); "
+                f"retrying in {wait_s:.1f}s. error={repr(exc)}"
+            )
+            time.sleep(wait_s)
+
+    raise last_exc or RuntimeError("Unknown LLM rewrite failure")
+
 
 
 def _build_system_prompt(user_profile: dict | None) -> str:
@@ -471,10 +520,19 @@ def llm_recommendation_rewrite(state: GraphState) -> GraphState:
     user_profile = state.get("user_profile")
     if not risk_summary:
         return {"recommendations": fallback}
+    
+    if _should_skip_llm_rewrite_for_timeout(state):
+        print(
+            "Skipping LLM rewrite due to timeout pressure; "
+            f"risk_items={len(risk_summary)}"
+        )
+        return {"recommendations": fallback}
+
 
     try:
         messages = _build_llm_rewrite_messages(risk_summary, fallback, user_profile)
-        validated = LLM_REWRITE_MODEL.invoke(messages)
+        validated = _invoke_rewrite_model_with_retry(messages)
+
 
         rewritten = []
         for rec in validated.recommendations:
@@ -536,3 +594,26 @@ def load_user_profile(state: GraphState) -> GraphState:
         # keep fallback behavior, but make failure visible in logs
         print(f"Profile load failed for sub={user_sub}: {exc}")
         return {"user_profile": None}
+
+
+def _should_skip_llm_rewrite_for_timeout(state: GraphState) -> bool:
+    """
+    Decide whether the LLM rewrite should be skipped to protect endpoint latency.
+
+    If we do not have a deadline configured, we allow the rewrite.
+    If remaining time is below the configured minimum buffer, we skip it and
+    keep deterministic recommendations.
+    """
+    deadline = state.get("llm_deadline_monotonic")
+    min_remaining = state.get("llm_min_time_remaining_seconds")
+
+    if deadline is None or min_remaining is None:
+        return False
+
+    remaining = deadline - time.monotonic()
+
+    # Defensive guard: invalid values should not break the request path.
+    if not math.isfinite(remaining):
+        return False
+
+    return remaining < min_remaining

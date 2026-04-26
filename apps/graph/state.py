@@ -42,3 +42,9 @@ class GraphState(TypedDict, total=False):
     risk_summary: list[dict] | None
 
     user_profile: dict | None
+
+
+    # Optional latency-budget fields for timeout-safe LLM behavior.
+    request_started_at_monotonic: float | None
+    llm_deadline_monotonic: float | None
+    llm_min_time_remaining_seconds: float | None

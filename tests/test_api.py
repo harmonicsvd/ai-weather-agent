@@ -30,7 +30,9 @@ def test_internal_meeting_weather_summary_returns_graph_derived_payload(
 ) -> None:
     """Endpoint should map graph output into stable API summary contract."""
     class _FakeGraph:
+        """Minimal graph stub so the API test can avoid real graph execution."""
         def invoke(self, _state):
+            """Return a deterministic payload shaped like real graph output."""
             return {
                 "events": [
                     {

@@ -48,19 +48,23 @@ class ProfileClient:
         self,
         base_url: str | None = None,
         internal_api_key: str | None = None,
-        timeout_seconds: float = 5.0,
+        timeout_seconds: float = 15.0,
     ) -> None:
+        """Create a small authenticated client for internal profile lookups."""
         self.base_url = (base_url or os.getenv("PROFILE_API_BASE_URL", "http://127.0.0.1:8000")).rstrip("/")
         self.internal_api_key = internal_api_key or os.getenv("PROFILE_INTERNAL_API_KEY", "")
         self._client = httpx.Client(timeout=timeout_seconds)
 
     def __enter__(self) -> "ProfileClient":
+        """Allow context-manager use so callers can rely on automatic cleanup."""
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
+        """Close the underlying HTTP client after the `with` block finishes."""
         self.close()
 
     def close(self) -> None:
+        """Release network resources held by the internal HTTP client."""
         self._client.close()
 
     @retry(
@@ -70,6 +74,7 @@ class ProfileClient:
         retry=retry_if_exception_type((httpx.TimeoutException, httpx.TransportError)),
     )
     def _request_json(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Send one authenticated GET request to the voice backend."""
         if not self.internal_api_key:
             raise ProfileProviderError("PROFILE_INTERNAL_API_KEY is not configured.")
         response = self._client.get(

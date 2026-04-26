@@ -1,6 +1,7 @@
 """Unit tests for graph nodes and routing behavior."""
 
 import pytest
+import time
 
 from apps.graph.nodes import (
     score_event_weather_risk,
@@ -269,7 +270,9 @@ def test_add_high_risk_actions_no_change_when_no_high_risk() -> None:
 def test_llm_recommendation_rewrite_returns_structured_lines(monkeypatch: pytest.MonkeyPatch) -> None:
     """LLM rewrite should map structured response into user-facing text lines."""
     class _FakeModel:
+        """Model stub that always returns one valid structured recommendation."""
         def invoke(self, _messages):
+            """Mimic the structured output contract used by the real model."""
             return LLMRecommendationsResponseSchema(
                 recommendations=[
                     LLMEventRecommendationSchema(
@@ -298,7 +301,9 @@ def test_llm_recommendation_rewrite_returns_structured_lines(monkeypatch: pytest
 def test_llm_recommendation_rewrite_falls_back_when_model_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     """Any model failure should fall back to deterministic recommendations."""
     class _FailModel:
+        """Model stub that always fails to exercise fallback behavior."""
         def invoke(self, _messages):
+            """Raise a non-retryable error so rewrite code keeps fallback lines."""
             raise RuntimeError("model unavailable")
 
     monkeypatch.setattr(nodes_module, "LLM_REWRITE_MODEL", _FailModel())
@@ -312,3 +317,103 @@ def test_llm_recommendation_rewrite_falls_back_when_model_fails(monkeypatch: pyt
 
     out = llm_recommendation_rewrite(state)
     assert out["recommendations"] == ["fallback recommendation"]
+
+
+def test_llm_recommendation_rewrite_retries_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Transient retryable LLM failure should sleep, retry, and then succeed."""
+    class _FlakyModel:
+        """Model stub that fails once, then succeeds on the second call."""
+        def __init__(self):
+            """Track call count so the test can prove retry behavior happened."""
+            self.calls = 0
+
+        def invoke(self, _messages):
+            """First call simulates provider overload; second returns valid output."""
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("503 UNAVAILABLE")
+            return LLMRecommendationsResponseSchema(
+                recommendations=[
+                    LLMEventRecommendationSchema(
+                        event_title="Site Survey",
+                        risk="low",
+                        reason="clear weather",
+                        actions=["Proceed as planned"],
+                    )
+                ]
+            )
+
+    flaky = _FlakyModel()
+    monkeypatch.setattr(nodes_module, "LLM_REWRITE_MODEL", flaky)
+    monkeypatch.setattr(nodes_module.time, "sleep", lambda _s: None)
+
+    state = {
+        "risk_summary": [
+            {"event_title": "Site Survey", "city": "Berlin", "risk": "low", "reason": "clear weather"}
+        ],
+        "recommendations": ["fallback line"],
+    }
+
+    out = llm_recommendation_rewrite(state)
+
+    assert flaky.calls == 2
+    assert "Site Survey: low risk." in out["recommendations"][0]
+    assert "Reason: clear weather." in out["recommendations"][0]
+
+
+def test_llm_recommendation_rewrite_skips_when_deadline_too_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rewrite node should return fallback immediately when too little time remains."""
+    class _UnexpectedModelCall:
+        def invoke(self, _messages):
+            raise AssertionError("LLM should not be called when timeout fast path is active")
+
+    monkeypatch.setattr(nodes_module, "LLM_REWRITE_MODEL", _UnexpectedModelCall())
+
+    now = time.monotonic()
+    state = {
+        "risk_summary": [
+            {"event_title": "Site Survey", "city": "Berlin", "risk": "moderate", "reason": "rain expected"}
+        ],
+        "recommendations": ["fallback line"],
+        "llm_deadline_monotonic": now + 0.2,
+        "llm_min_time_remaining_seconds": 1.0,
+    }
+
+    out = llm_recommendation_rewrite(state)
+    assert out["recommendations"] == ["fallback line"]
+
+
+def test_llm_recommendation_rewrite_runs_when_enough_time_remains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rewrite node should still call the model when the latency budget is healthy."""
+    class _FakeModel:
+        def invoke(self, _messages):
+            return LLMRecommendationsResponseSchema(
+                recommendations=[
+                    LLMEventRecommendationSchema(
+                        event_title="Site Survey",
+                        risk="low",
+                        reason="clear weather",
+                        actions=["Proceed as planned"],
+                    )
+                ]
+            )
+
+    monkeypatch.setattr(nodes_module, "LLM_REWRITE_MODEL", _FakeModel())
+
+    now = time.monotonic()
+    state = {
+        "risk_summary": [
+            {"event_title": "Site Survey", "city": "Berlin", "risk": "low", "reason": "clear weather"}
+        ],
+        "recommendations": ["fallback line"],
+        "llm_deadline_monotonic": now + 10.0,
+        "llm_min_time_remaining_seconds": 1.0,
+    }
+
+    out = llm_recommendation_rewrite(state)
+    assert "Site Survey: low risk." in out["recommendations"][0]
+
