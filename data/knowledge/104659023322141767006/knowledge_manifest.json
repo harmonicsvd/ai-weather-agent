@@ -1,0 +1,12 @@
+{
+  "user_sub": "104659023322141767006",
+  "role": "contractor",
+  "commute_mode": "public_transport",
+  "risk_tolerance": "low",
+  "documents": [
+    "site_notes.md",
+    "client_brief.md",
+    "safety_rules.md",
+    "travel_logistics.md"
+  ]
+}

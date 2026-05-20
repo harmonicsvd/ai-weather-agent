@@ -48,3 +48,9 @@ class GraphState(TypedDict, total=False):
     request_started_at_monotonic: float | None
     llm_deadline_monotonic: float | None
     llm_min_time_remaining_seconds: float | None
+    
+    
+    #retriver varibles
+    retrieved_context: list[dict] | None
+    retrieval_query: str | None
+    retrieved_context_by_event: dict[str, list[dict]] | None

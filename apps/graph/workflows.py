@@ -16,11 +16,13 @@ from apps.graph.nodes import (
     format_meeting_recommendations,
     apply_user_default_city,
     add_high_risk_actions,
-    load_user_profile
+    load_user_profile,
+    retrieve_meeting_context
     
 )
 
 from apps.graph.state import GraphState
+
 
 
 def route_after_risk_scoring(state: GraphState) -> str:
@@ -104,6 +106,8 @@ def build_meeting_preview_graph(checkpointer=None):
     graph.add_node("add_high_risk_actions", add_high_risk_actions)
     graph.add_node("llm_recommendation_rewrite", llm_recommendation_rewrite)
     graph.add_node("load_user_profile", load_user_profile)
+    graph.add_node("retrieve_meeting_context", retrieve_meeting_context)
+
 
 
 
@@ -112,7 +116,8 @@ def build_meeting_preview_graph(checkpointer=None):
     graph.add_edge("load_calendar_events", "filter_in_person_events")
     graph.add_edge("filter_in_person_events", "load_user_profile")
     graph.add_edge("load_user_profile", "apply_user_default_city")
-    graph.add_edge("apply_user_default_city", "fetch_weather_for_events")
+    graph.add_edge("apply_user_default_city", "retrieve_meeting_context")
+    graph.add_edge("retrieve_meeting_context", "fetch_weather_for_events")
 
     graph.add_edge("fetch_weather_for_events", "score_event_weather_risk")
     graph.add_conditional_edges(

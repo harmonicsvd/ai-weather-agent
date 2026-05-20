@@ -31,6 +31,8 @@ from apps.tools.profile_client import ProfileClient, ProfileProviderError
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from apps.rag.embeddings import GeminiEmbeddingProvider
+from apps.rag.retriever import retrieve_user_context
 
 LLM_REWRITE_MODEL = init_chat_model(
     "google_genai:gemini-2.5-flash",
@@ -100,6 +102,9 @@ def _build_system_prompt(user_profile: dict | None) -> str:
         "- Keep risk labels exactly as: low, moderate, high, blocked, unknown.\n"
         "- Do not invent events or weather data.\n"
         "- Keep reasons short, specific, and actionable."
+        "\n\nIf retrieved_context is provided, use it to make recommendations more specific.\n"
+        "Do not hallucinate beyond retrieved snippets.\n"
+        "If retrieved_context is empty, continue with weather + profile only."
     )
 
     if not user_profile:
@@ -136,7 +141,9 @@ def _build_llm_rewrite_messages(
     risk_summary: list[dict],
     fallback: list[str],
     user_profile: dict | None = None,
+    retrieved_context: list[dict] | None = None,
 ) -> list:
+
     """Package deterministic state into chat messages for structured LLM output."""
     system = SystemMessage(content=_build_system_prompt(user_profile))
 
@@ -146,6 +153,8 @@ def _build_llm_rewrite_messages(
                 "risk_summary": risk_summary,
                 "existing_recommendations": fallback,
                 "user_profile": user_profile or {},
+                "retrieved_context": retrieved_context or [],
+
             },
             ensure_ascii=False,
         )
@@ -482,11 +491,28 @@ def format_meeting_recommendations(state: GraphState) -> GraphState:
     Format the final response to include weather risk recommendations for meetings.
     """
     recommendations = state.get("recommendations") or []
+    retrieved_context = state.get("retrieved_context") or []
+
     if not recommendations:
         return {"final_response": "No in-person meetings found or no weather data available."}
 
     formatted_response = "Weather Risk Recommendations for Your Meetings:\n" + "\n".join(recommendations)
+
+    if retrieved_context:
+        seen = set()
+        source_lines = []
+        for item in retrieved_context:
+            source = (item.get("source_file") or "unknown").strip()
+            if source in seen:
+                continue
+            seen.add(source)
+            source_lines.append(f"- {source}")
+
+        if source_lines:
+            formatted_response += "\n\nContext Sources:\n" + "\n".join(source_lines)
+
     return {"final_response": formatted_response}
+
 
 
 def add_high_risk_actions(state: GraphState) -> GraphState:
@@ -518,6 +544,8 @@ def llm_recommendation_rewrite(state: GraphState) -> GraphState:
     risk_summary = state.get("risk_summary") or []
     fallback = list(state.get("recommendations") or [])
     user_profile = state.get("user_profile")
+    retrieved_context = state.get("retrieved_context") or []
+
     if not risk_summary:
         return {"recommendations": fallback}
     
@@ -530,7 +558,7 @@ def llm_recommendation_rewrite(state: GraphState) -> GraphState:
 
 
     try:
-        messages = _build_llm_rewrite_messages(risk_summary, fallback, user_profile)
+        messages = _build_llm_rewrite_messages(risk_summary, fallback, user_profile, retrieved_context)
         validated = _invoke_rewrite_model_with_retry(messages)
 
 
@@ -617,3 +645,84 @@ def _should_skip_llm_rewrite_for_timeout(state: GraphState) -> bool:
         return False
 
     return remaining < min_remaining
+
+
+
+def retrieve_meeting_context(state: GraphState) -> GraphState:
+    """
+    Retrieve user-specific knowledge snippets for in-person meetings.
+
+    Retrieval is best-effort:
+    - if config/model/docs fail, return empty context
+    - downstream recommendation logic must still work without retrieval
+    """
+    events = state.get("in_person_events") or []
+    user_sub = (state.get("user_sub") or "").strip()
+
+    if not events or not user_sub:
+        return {"retrieved_context": [], "retrieval_query": None}
+
+    query_parts: list[str] = []
+    for event in events[:3]:
+        title = (event.get("title") or "").strip()
+        city = (event.get("city") or "").strip()
+        location = (event.get("location") or "").strip()
+
+        piece = " ".join(part for part in [title, city, location] if part)
+        if piece:
+            query_parts.append(piece)
+
+    retrieval_query = " | ".join(query_parts).strip()
+    if not retrieval_query:
+        return {"retrieved_context": [], "retrieval_query": None}
+
+    try:
+        provider = GeminiEmbeddingProvider()
+
+        # Keep legacy flat context (for backward compatibility),
+        # and add event-level attribution.
+        flat_context: list[dict] = []
+        context_by_event: dict[str, list[dict]] = {}
+
+        for event in events:
+            event_title = (event.get("title") or "Untitled Event").strip()
+            city = (event.get("city") or "").strip()
+            location = (event.get("location") or "").strip()
+
+            event_query = " ".join(part for part in [event_title, city, location] if part).strip()
+            if not event_query:
+                context_by_event[event_title] = []
+                continue
+
+            event_hits = retrieve_user_context(
+                user_sub=user_sub,
+                query_text=event_query,
+                embedding_provider=provider,
+                top_k=2,
+            )
+
+            event_context = [
+                {
+                    "text": h.chunk.text,
+                    "score": h.score,
+                    "source_file": h.chunk.metadata.get("source_file"),
+                    "event_title": event_title,
+                }
+                for h in event_hits
+            ]
+
+            context_by_event[event_title] = event_context
+            flat_context.extend(event_context)
+
+        return {
+            "retrieved_context": flat_context,
+            "retrieved_context_by_event": context_by_event,
+            "retrieval_query": retrieval_query,
+        }
+    except Exception as exc:
+        print(f"RAG retrieval failed; continuing without context. error={repr(exc)}")
+        return {
+    "retrieved_context": [],
+    "retrieved_context_by_event": {},
+    "retrieval_query": retrieval_query,
+}

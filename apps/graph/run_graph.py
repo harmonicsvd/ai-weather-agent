@@ -45,11 +45,34 @@ def run_case(user_query: str, user_id: str, label: str) -> None:
         print(f"\n[{label}]")
         print("thread_id:", config["configurable"]["thread_id"])
         print("error:", result.get("error"))
-        print("in_person_events:", result.get("in_person_events"))
-        print("risk_summary:", result.get("risk_summary"))
-        print("recommendations:", result.get("recommendations"))
-        print("final_response:", result.get("final_response"))
-        
+
+        events = result.get("in_person_events") or []
+        print(f"in_person_events_count: {len(events)}")
+        for e in events:
+            print(f"  - {e.get('title')} | {e.get('time')} | {e.get('city')} ({e.get('city_source')})")
+
+        risk = result.get("risk_summary") or []
+        print(f"risk_summary_count: {len(risk)}")
+        for r in risk:
+            print(
+                f"  - {r.get('event_title')}: {r.get('risk')} | city={r.get('city')} | "
+                f"code={r.get('weather_code')} | wind={r.get('wind_speed_kmh')} | temp={r.get('temperature_c')}"
+            )
+
+        recs = result.get("recommendations") or []
+        print(f"recommendations_count: {len(recs)}")
+        for i, rec in enumerate(recs, 1):
+            print(f"  {i}. {rec}")
+
+        retrieved_by_event = result.get("retrieved_context_by_event") or {}
+        if retrieved_by_event:
+            print("context_sources_by_event:")
+            for event_title, items in retrieved_by_event.items():
+                unique_sources = sorted({(it.get("source_file") or "unknown") for it in (items or [])})
+                print(f"  - {event_title}: {', '.join(unique_sources) if unique_sources else 'none'}")
+
+        print("final_response:")
+        print(result.get("final_response"))
 
         latest = app.get_state(config)
         history = list(app.get_state_history(config))

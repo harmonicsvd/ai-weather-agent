@@ -9,6 +9,7 @@ from apps.graph.nodes import (
     apply_user_default_city,
     add_high_risk_actions,
     llm_recommendation_rewrite,
+    format_meeting_recommendations
 )
 
 
@@ -416,4 +417,57 @@ def test_llm_recommendation_rewrite_runs_when_enough_time_remains(
 
     out = llm_recommendation_rewrite(state)
     assert "Site Survey: low risk." in out["recommendations"][0]
+
+
+
+def test_llm_rewrite_includes_retrieved_context_in_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    class _FakeModel:
+        def invoke(self, messages):
+            captured["messages"] = messages
+            return LLMRecommendationsResponseSchema(
+                recommendations=[
+                    LLMEventRecommendationSchema(
+                        event_title="Site Survey",
+                        risk="low",
+                        reason="clear weather",
+                        actions=["Proceed as planned"],
+                    )
+                ]
+            )
+
+    monkeypatch.setattr(nodes_module, "LLM_REWRITE_MODEL", _FakeModel())
+
+    state = {
+        "risk_summary": [
+            {"event_title": "Site Survey", "city": "Berlin", "risk": "low", "reason": "clear weather"}
+        ],
+        "recommendations": ["fallback line"],
+        "retrieved_context": [{"text": "Gate C queue is long in rain", "score": 0.91, "source_file": "travel_logistics.md"}],
+        "user_profile": {"role": "contractor"},
+    }
+
+    out = llm_recommendation_rewrite(state)
+    assert "Site Survey: low risk." in out["recommendations"][0]
+
+    human_payload = captured["messages"][1].content
+    assert "retrieved_context" in human_payload
+    assert "Gate C queue is long in rain" in human_payload
+    
+def test_format_meeting_recommendations_includes_context_sources() -> None:
+    state = {
+        "recommendations": ["Site Survey: low risk."],
+        "retrieved_context": [
+            {"text": "snippet 1", "score": 0.8, "source_file": "site_notes.md"},
+            {"text": "snippet 2", "score": 0.7, "source_file": "travel_logistics.md"},
+            {"text": "snippet 3", "score": 0.6, "source_file": "site_notes.md"},
+        ],
+    }
+
+    out = format_meeting_recommendations(state)
+    assert "Context Sources:" in out["final_response"]
+    assert "- site_notes.md" in out["final_response"]
+    assert "- travel_logistics.md" in out["final_response"]
+
 
