@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 
 """Internal API facade for the weather LangGraph workflow."""
 
@@ -23,7 +24,7 @@ MEETING_PREVIEW_APP = build_meeting_preview_graph(checkpointer=None)
 
 app = FastAPI(title="Weather Agent Internal API")
 
-
+logger = logging.getLogger(__name__)
 def require_internal_api_key(x_internal_api_key: str | None):
     """
     Validate backend-to-backend auth header for internal weather endpoints.
@@ -175,9 +176,10 @@ def internal_meeting_weather_summary(
     err = require_internal_api_key(x_internal_api_key)
     if err:
         return err
-
+    total_started = time.perf_counter()
     try:
         from_iso, to_iso, resolved_date, resolved_tz = _day_window_utc(date, tz)
+        graph_started = time.perf_counter()
         request_started_at_monotonic = time.monotonic()
         llm_budget_seconds = 6.0
         llm_min_time_remaining_seconds = 1.5
@@ -195,12 +197,28 @@ def internal_meeting_weather_summary(
                 "llm_min_time_remaining_seconds": llm_min_time_remaining_seconds,
             }
         )
+        graph_ms = (time.perf_counter() - graph_started) * 1000
+        build_started = time.perf_counter()
 
         payload = _build_summary_payload(result, user_sub, resolved_date, resolved_tz)
+        build_ms = (time.perf_counter() - build_started) * 1000
         if result.get("error"):
             payload["error"] = result["error"]
         return payload
+    
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
+    
+    finally:
+        total_ms = (time.perf_counter() - total_started) * 1000
+        logger.info(
+            "internal_meeting_weather_summary_done user_sub=%s date=%s tz=%s total_ms=%.1f graph_ms=%.1f payload_ms=%.1f",
+            user_sub,
+            date,
+            tz,
+            total_ms,
+            locals().get("graph_ms", -1.0),
+            locals().get("build_ms", -1.0),
+        )

@@ -1,6 +1,7 @@
 """Standalone demo entrypoint for a tool-calling weather agent."""
 
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -18,7 +19,7 @@ from apps.tools.weather_client import (
 
 # Load local env vars (API keys/provider config) from weather-agent/.env.
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=True)
-
+logger = logging.getLogger(__name__)
 # Global behavior contract for the model.
 # We keep this explicit so tool usage rules are easy to understand and edit.
 SYSTEM_PROMPT = """You are an expert weather forecaster, who speaks in puns.
