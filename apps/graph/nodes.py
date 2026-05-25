@@ -700,7 +700,7 @@ def retrieve_meeting_context(state: GraphState) -> GraphState:
                 embedding_provider=provider,
                 top_k=2,
             )
-
+            print(f"RAG hits for '{event_title}': {len(event_hits)}")
             event_context = [
                 {
                     "text": h.chunk.text,

@@ -51,13 +51,25 @@ def retrieve_user_context(
 
     chunk_texts = [c.text for c in chunks]
     chunk_vectors = embedding_provider.embed_documents(chunk_texts)
+
     if len(chunk_vectors) != len(chunks):
-        raise ValueError("Embedding provider returned mismatched document vector count.")
+        raise ValueError(
+            f"Embedding provider returned mismatched document vector count: "
+            f"{len(chunk_vectors)} vs {len(chunks)}"
+        )
+
+    # Skip bad/empty vectors instead of crashing retrieval.
+    pairs = [
+        (chunk, vec)
+        for chunk, vec in zip(chunks, chunk_vectors)
+        if isinstance(vec, list) and len(vec) > 0
+    ]
+    if not pairs:
+        return []
 
     index = InMemoryVectorIndex()
-    for chunk, vec in zip(chunks, chunk_vectors):
+    for chunk, vec in pairs:
         index.add(chunk, vec)
-
     query_vector = embedding_provider.embed_query(query_text)
     hits = index.search(query_vector, top_k=top_k, filters={"user_sub": user_sub})
 

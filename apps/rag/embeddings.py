@@ -31,9 +31,31 @@ class GeminiEmbeddingProvider:
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        vectors = self._emb.embed_documents(texts)
-        # normalize to plain list[list[float]]
-        return [list(map(float, v)) for v in vectors]
+
+        # Keep order + size identical to input list.
+        normalized = [t.strip() for t in texts]
+
+        # First try batch embedding (fast path).
+        try:
+            batch_vectors = self._emb.embed_documents(normalized)
+        except Exception:
+            batch_vectors = []
+
+        # If provider returns exact count, use it.
+        if len(batch_vectors) == len(normalized):
+            return [list(map(float, v)) for v in batch_vectors]
+
+        # Fallback: embed one-by-one so count always matches.
+        vectors: list[list[float]] = []
+        for text in normalized:
+            if not text:
+                # Shouldn't happen with your chunker, but keep safe.
+                vectors.append([])
+                continue
+            vec = self._emb.embed_query(text)
+            vectors.append(list(map(float, vec)))
+
+        return vectors
 
     def embed_query(self, text: str) -> list[float]:
         if not text.strip():
