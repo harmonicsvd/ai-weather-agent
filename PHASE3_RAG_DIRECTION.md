@@ -24,7 +24,7 @@ That means the assistant should retrieve context from files such as:
 - travel notes
 - operation documents
 
-The weather-agent can then combine:
+Sham (`weather-agent`) can then combine:
 
 - calendar event context
 - weather forecast/risk

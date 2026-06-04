@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""HTTP client that fetches user profile data from voice-agent."""
+"""Sham client that fetches employee profile data from Ram."""
 
 import os
 from pathlib import Path
@@ -20,7 +20,7 @@ class ProfileProviderError(Exception):
 
 class UserProfileSchema(BaseModel):
     """
-    Normalized profile shape returned by voice-agent internal profile endpoint.
+    Normalized profile shape returned by Ram's internal profile endpoint.
 
     Includes optional personalization fields used by LLM recommendation rewrite.
     """
@@ -42,7 +42,7 @@ class InternalProfileResponseSchema(BaseModel):
 
 
 class ProfileClient:
-    """HTTP client for voice backend `/internal/profile/{sub}` endpoint."""
+    """HTTP client for Ram (`voice-scheduling-agent`) `/internal/profile/{sub}`."""
 
     def __init__(
         self,

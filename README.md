@@ -1,6 +1,6 @@
-# AI Weather Agent
+# Sham Weather Intelligence Agent
 
-LangGraph-based weather decisioning service for meeting workflows.
+Sham is the company-side LangGraph service for weather decisioning and document-aware meeting guidance.
 
 ## What It Does
 - Reads meetings from a calendar backend.
@@ -18,7 +18,7 @@ This repository owns:
 - Rule-based risk scoring
 - Internal summary API for downstream services
 
-It is designed to work with a companion backend (`voice-scheduling-agent`) that provides:
+It is designed to work with Ram (`voice-scheduling-agent`), which provides:
 - Calendar read endpoints
 - Profile endpoints
 - Voice assistant integration
@@ -90,7 +90,7 @@ This service calls the companion backend:
 - `GET /internal/events`
 - `GET /internal/profile/{sub}`
 
-The companion backend calls this service:
+Ram calls Sham:
 - `GET /internal/meeting-weather-summary`
 
 All internal routes are key-protected.

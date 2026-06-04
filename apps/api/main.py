@@ -1,7 +1,8 @@
 from __future__ import annotations
+from contextlib import asynccontextmanager
 import logging
 
-"""Internal API facade for the weather LangGraph workflow."""
+"""Sham internal API: weather intelligence, document ingestion, and LangGraph workflows."""
 
 import hmac
 import time
@@ -11,10 +12,21 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, Query
+from fastapi import FastAPI, Header, Query, UploadFile, File, Form, logger
 from fastapi.responses import JSONResponse
 
+from uuid import uuid4
+from io import BytesIO
+from pypdf import PdfReader
+
+from apps.rag.vector_store import init_vector_store, save_chunk_vectors
+
 from apps.graph.workflows import build_meeting_preview_graph
+
+from apps.rag.ingestion import chunk_uploaded_markdown
+
+from apps.rag.embeddings import GeminiEmbeddingProvider
+
 
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env", override=False)
@@ -22,9 +34,24 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env", override=F
 WEATHER_INTERNAL_API_KEY = os.getenv("WEATHER_INTERNAL_API_KEY", "")
 MEETING_PREVIEW_APP = build_meeting_preview_graph(checkpointer=None)
 
-app = FastAPI(title="Weather Agent Internal API")
+logger = logging.getLogger("uvicorn.error")
 
-logger = logging.getLogger(__name__)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize Sham vector storage."""
+    try:
+        init_vector_store()
+        logger.info("vector_store_init_done")
+    except Exception as exc:
+        logger.error("vector_store_init_failed error=%r", exc)
+        raise
+
+    yield
+
+app = FastAPI(title="Sham Weather Intelligence Internal API", lifespan=lifespan)
+
+
+
 def require_internal_api_key(x_internal_api_key: str | None):
     """
     Validate backend-to-backend auth header for internal weather endpoints.
@@ -119,7 +146,7 @@ def _build_summary_payload(result: dict, user_sub: str, resolved_date: str, reso
     online_events = [event for event in events if not _is_in_person_event(event)]
     risk_summary = result.get("risk_summary") or []
     recommendations = result.get("recommendations") or []
-
+    retrieved_context = result.get("retrieved_context") or []
     if not events:
         summary_text = f"You have no meetings on {resolved_date}."
     else:
@@ -152,7 +179,9 @@ def _build_summary_payload(result: dict, user_sub: str, resolved_date: str, reso
         "events": events,
         "risk_summary": risk_summary,
         "recommendations": recommendations,
+        "retrieved_context": retrieved_context,
         "summary_text": summary_text,
+        
     }
 
 
@@ -222,3 +251,135 @@ def internal_meeting_weather_summary(
             locals().get("graph_ms", -1.0),
             locals().get("build_ms", -1.0),
         )
+
+
+@app.post("/internal/knowledge/upload")
+async def internal_knowledge_upload(
+    user_sub: str = Form(...),
+    file: UploadFile = File(...),
+    x_internal_api_key: str | None = Header(default=None),
+):
+    """Receive an authenticated Ram user PDF for Sham RAG ingestion."""
+    err = require_internal_api_key(x_internal_api_key)
+    if err:
+        return err
+
+    if file.content_type != "application/pdf":
+        return JSONResponse(
+            {"error": "Only PDF files are supported"},
+            status_code=400,
+        )
+
+    file_bytes = await file.read()
+    
+    if not file_bytes:
+        return JSONResponse(
+            {"error": "Uploaded file is empty"},
+            status_code=400,
+        )
+        
+    original_name = Path(file.filename or "upload.pdf").name
+    document_id = uuid4().hex
+    stored_name = f"{document_id}-{original_name}"
+
+    upload_dir = (
+        Path(__file__).resolve().parents[2]
+        / "data"
+        / "knowledge_uploads"
+        / user_sub
+        / "originals"
+    )
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    stored_path = upload_dir / stored_name
+    stored_path.write_bytes(file_bytes)
+
+    logger.info(
+        "weather_knowledge_pdf_saved document_id=%s user_sub=%s stored_path=%s size_bytes=%s",
+        document_id,
+        user_sub,
+        stored_path,
+        len(file_bytes),
+    )
+
+    markdown_text = extract_pdf_to_markdown(file_bytes, original_name)
+
+    markdown_dir = (
+        Path(__file__).resolve().parents[2]
+        / "data"
+        / "knowledge_uploads"
+        / user_sub
+        / "markdown"
+    )
+    markdown_dir.mkdir(parents=True, exist_ok=True)
+
+    markdown_path = markdown_dir / f"{document_id}.md"
+    markdown_path.write_text(markdown_text, encoding="utf-8")
+    
+    chunks = chunk_uploaded_markdown(
+        user_sub=user_sub,
+        markdown_path=markdown_path,
+        original_filename=original_name,
+    )
+
+    logger.info(
+    "weather_knowledge_chunks_created document_id=%s chunks=%s",
+    document_id,
+    len(chunks),
+)   
+    embedding_provider = GeminiEmbeddingProvider()
+    vectors = embedding_provider.embed_documents(
+        [chunk.text for chunk in chunks]
+    )
+    
+    if len(vectors) != len(chunks):
+        return JSONResponse(
+            {"error": "Embedding count does not match chunk count"},
+            status_code=500,
+        )
+        
+    saved_vector_count = save_chunk_vectors(
+            document_id=document_id,
+            user_sub=user_sub,
+            chunks=chunks,
+            vectors=vectors,
+        )
+    logger.info(
+            "weather_knowledge_markdown_saved document_id=%s chars=%s markdown_path=%s",
+            document_id,
+            len(markdown_text),
+            markdown_path,
+        )
+
+    logger.info(
+        "weather_knowledge_pdf_received user_sub=%s filename=%s size_bytes=%s",
+        user_sub,
+        file.filename,
+        len(file_bytes),
+    )
+
+    return {
+        "ok": True,
+        "document_id": document_id,
+        "user_sub": user_sub,
+        "filename": original_name,
+        "stored_name": stored_name,
+        "size_bytes": len(file_bytes),
+        "markdown_path": str(markdown_path),
+        "markdown_chars": len(markdown_text),
+        "vector_count": len(vectors),
+        "saved_vector_count": saved_vector_count,
+    }
+
+
+def extract_pdf_to_markdown(file_bytes: bytes, original_name: str) -> str:
+    """Extract readable PDF text into Markdown sections."""
+    reader = PdfReader(BytesIO(file_bytes))
+    sections = [f"# {original_name}"]
+
+    for page_number, page in enumerate(reader.pages, start=1):
+        text = (page.extract_text() or "").strip()
+        if text:
+            sections.append(f"## Page {page_number}\n\n{text}")
+
+    return "\n\n".join(sections).strip()

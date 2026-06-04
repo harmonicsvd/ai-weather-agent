@@ -3,11 +3,15 @@ from __future__ import annotations
 """RAG retriever pipeline: load -> chunk -> embed -> index -> search."""
 
 from dataclasses import dataclass
+import logging
 from typing import Protocol
 
 from apps.rag.chunker import RAGChunk, chunk_documents
 from apps.rag.index import InMemoryVectorIndex
 from apps.rag.loader import load_user_knowledge_documents
+from apps.rag.vector_store import search_chunk_vectors
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class EmbeddingProvider(Protocol):
@@ -40,6 +44,55 @@ def retrieve_user_context(
     """
     if not query_text.strip():
         return []
+    
+    query_vector = embedding_provider.embed_query(query_text)
+
+    try:
+        vector_hits = search_chunk_vectors(
+            user_sub=user_sub,
+            query_vector=query_vector,
+            top_k=top_k,
+        )
+    except Exception as exc:
+        logger.warning(
+            "rag_pgvector_search_failed_fallback_to_files user_sub=%s query=%s error=%r",
+            user_sub,
+            query_text,
+            exc,
+        )
+        vector_hits = []
+
+    if vector_hits:
+        logger.info(
+            "rag_pgvector_hits user_sub=%s query=%s hits=%s sources=%s",
+            user_sub,
+            query_text,
+            len(vector_hits),
+            [hit["source_file"] for hit in vector_hits],
+        )
+        return [
+            RetrievedContext(
+                chunk=RAGChunk(
+                    chunk_id=hit["chunk_id"],
+                    text=hit["text"],
+                    metadata={
+                        "user_sub": hit["user_sub"],
+                        "source_file": hit["source_file"],
+                        "source_path": hit["source_path"],
+                        "document_id": hit["document_id"],
+                        "chunk_index": hit["chunk_index"],
+                    },
+                ),
+                score=hit["score"],
+            )
+            for hit in vector_hits
+        ]
+
+    logger.info(
+        "rag_pgvector_no_hits_fallback_to_files user_sub=%s query=%s",
+        user_sub,
+        query_text,
+    )
 
     docs = load_user_knowledge_documents(user_sub=user_sub)
     if not docs:

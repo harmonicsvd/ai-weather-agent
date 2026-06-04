@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""HTTP client that fetches events from voice-agent internal calendar endpoint."""
+"""Sham client that fetches events from Ram's internal calendar endpoint."""
 
 import os
 from pathlib import Path
@@ -22,7 +22,7 @@ class CalendarProviderError(Exception):
 
 
 class CalendarClient:
-    """HTTP client for voice backend `/internal/events` endpoint."""
+    """HTTP client for Ram (`voice-scheduling-agent`) `/internal/events`."""
 
     def __init__(self, base_url: str | None = None, timeout_seconds: float = 30.0) -> None:
         """Create one reusable HTTP client with env-driven auth configuration."""

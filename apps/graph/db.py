@@ -1,10 +1,10 @@
-"""Direct SQLite access helper for reading voice-agent user profile data."""
+"""Direct SQLite access helper for reading Ram user profile data."""
 
 import sqlite3
 import os
 
 def get_db():
-    """Open SQLite connection to voice-agent DB with dict-like row access."""
+    """Open SQLite connection to Ram's local DB with dict-like row access."""
     # Assume the DB is in the voice-scheduling-agent directory
     db_path = os.path.join(os.path.dirname(__file__), '../../../voice-scheduling-agent/app.db')
     conn = sqlite3.connect(db_path)

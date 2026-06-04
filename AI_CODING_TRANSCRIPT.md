@@ -7,8 +7,8 @@
 ## Project Scope
 This work is part of a two-service system:
 
-1. `voice-scheduling-agent` (FastAPI + UI + OAuth + VAPI tool webhooks)  
-2. `weather-agent` (FastAPI internal API + LangGraph workflow + weather/LLM recommendation pipeline)
+1. Ram: `voice-scheduling-agent` (FastAPI + UI + OAuth + VAPI tool webhooks)  
+2. Sham: `weather-agent` (FastAPI internal API + LangGraph workflow + weather/LLM recommendation pipeline)
 
 Core goal:
 - Users can schedule meetings by voice
@@ -33,13 +33,13 @@ Core goal:
 ## Architecture Summary
 
 ### Service Responsibilities
-- `voice-scheduling-agent`:
+- Ram (`voice-scheduling-agent`):
   - Google OAuth and session handling
   - Create-event tool endpoint
   - Internal events/profile endpoints
   - Meetings summary endpoint that delegates to weather service
 
-- `weather-agent`:
+- Sham (`weather-agent`):
   - Internal `/internal/meeting-weather-summary` endpoint
   - LangGraph flow:
     - load events
