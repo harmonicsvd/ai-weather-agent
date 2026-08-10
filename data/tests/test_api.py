@@ -79,3 +79,55 @@ def test_internal_meeting_weather_summary_returns_graph_derived_payload(
     assert body["counts"] == {"total": 2, "in_person": 1, "online": 1}
     assert "you have 2 meetings: 1 in-person and 1 online" in body["summary_text"].lower()
     assert body["risk_summary"][0]["risk"] == "low"
+
+
+def test_app_starts_when_vector_store_init_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing/suspended Postgres vector DB should not fail API startup."""
+    monkeypatch.setattr(api_main, "WEATHER_INTERNAL_API_KEY", "test-weather-key")
+    monkeypatch.setattr(
+        api_main,
+        "init_vector_store",
+        lambda: (_ for _ in ()).throw(OSError("failed to resolve host")),
+    )
+
+    with TestClient(api_main.app) as test_client:
+        response = test_client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    assert api_main.VECTOR_STORE_AVAILABLE is False
+
+
+def test_knowledge_upload_falls_back_when_vector_save_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PDF ingestion should keep file/markdown fallback when pgvector save is unavailable."""
+    class _FakeEmbeddingProvider:
+        def embed_documents(self, texts):
+            return [[1.0, 0.0] for _text in texts]
+
+    class _Chunk:
+        text = "site safety notes"
+
+    monkeypatch.setattr(api_main, "WEATHER_INTERNAL_API_KEY", "test-weather-key")
+    monkeypatch.setattr(api_main, "init_vector_store", lambda: None)
+    monkeypatch.setattr(api_main, "extract_pdf_to_markdown", lambda *_args: "# Notes")
+    monkeypatch.setattr(api_main, "chunk_uploaded_markdown", lambda **_kwargs: [_Chunk()])
+    monkeypatch.setattr(api_main, "GeminiEmbeddingProvider", _FakeEmbeddingProvider)
+    monkeypatch.setattr(
+        api_main,
+        "save_chunk_vectors",
+        lambda **_kwargs: (_ for _ in ()).throw(OSError("failed to resolve host")),
+    )
+
+    with TestClient(api_main.app) as test_client:
+        response = test_client.post(
+            "/internal/knowledge/upload",
+            data={"user_sub": "u1"},
+            files={"file": ("notes.pdf", b"%PDF-1.4", "application/pdf")},
+            headers={"X-Internal-API-Key": "test-weather-key"},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["saved_vector_count"] == 0
+    assert body["vector_store_available"] is False

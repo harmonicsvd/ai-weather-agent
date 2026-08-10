@@ -19,6 +19,18 @@ venv/
 
 data/*.sqlite*
 
+# Local uploaded knowledge artifacts
+data/knowledge_uploads/
 
 # Local learning tracker (keep local only)
 AGENTIC_WEATHER_ROADMAP.md
+
+# Sensitive files
+service_account.json
+*.crt
+*.pem
+*.key
+
+# Development tracking files (keep local only)
+docs/AI_CODING_TRANSCRIPT.md
+docs/PHASE3_RAG_DIRECTION.md

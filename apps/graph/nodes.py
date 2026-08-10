@@ -5,8 +5,13 @@ from __future__ import annotations
 import re
 import time
 import math
+import logging
+import httpx
+import os
+from dotenv import load_dotenv
+from pathlib import Path
 
-
+logger = logging.getLogger(__name__)
 
 # Node layer:
 # - Each function reads a subset of GraphState and returns only keys it updates.
@@ -23,7 +28,10 @@ from apps.tools.schemas import LLMRecommendationsResponseSchema
 
 from datetime import datetime, timedelta, timezone
 
-from apps.tools.calendar_client import CalendarClient, CalendarProviderError
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env", override=False)
+
+CALENDAR_API_BASE_URL = os.getenv("CALENDAR_API_BASE_URL", "http://127.0.0.1:8000")
+CALENDAR_INTERNAL_API_KEY = os.getenv("CALENDAR_INTERNAL_API_KEY", "")
 
 import json
 from apps.tools.profile_client import ProfileClient, ProfileProviderError
@@ -294,49 +302,111 @@ def format_response(state: GraphState) -> GraphState:
 
 def load_calendar_events(state: GraphState) -> GraphState:
     """
-    Load meetings from calendar API for today + next day.
+    Load meetings from Google Calendar API for today + next day.
     We intentionally start at day-begin (UTC) so "today" runs still include
     meetings that already happened earlier in the same day.
     """
+    logger.info("🔍 load_calendar_events: starting")
     from_iso = state.get("from_iso")
     to_iso = state.get("to_iso")
+    user_sub = state.get("user_sub")
+
     if not from_iso or not to_iso:
         now_utc = datetime.now(timezone.utc)
         day_start_utc = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
         from_iso = day_start_utc.isoformat().replace("+00:00", "Z")
         to_iso = (day_start_utc + timedelta(days=2)).isoformat().replace("+00:00", "Z")
 
-    try:
-        with CalendarClient() as client:
-            events = client.list_events(from_iso, to_iso)
-    except CalendarProviderError:
-        return {"events": [], "error": "Calendar provider is currently unavailable."}
+    if not user_sub:
+        logger.error("🔍 load_calendar_events: user_sub not provided")
+        return {"events": [], "error": "User ID not provided."}
 
+    # Fetch user's profile to get Google refresh token
+    from apps.tools.profile_client import ProfileClient, ProfileProviderError
+
+    try:
+        with ProfileClient() as profile_client:
+            profile = profile_client.get_profile_by_sub(user_sub)
+            if not profile:
+                logger.error(f"🔍 load_calendar_events: User profile not found for {user_sub}")
+                return {"events": [], "error": "User profile not found. Please authenticate with Google Calendar first."}
+            refresh_token = profile.google_refresh_token
+            if not refresh_token:
+                logger.error(f"🔍 load_calendar_events: Google Calendar not authenticated for {user_sub}")
+                return {"events": [], "error": "Google Calendar not authenticated. Please authenticate with Google Calendar first."}
+    except ProfileProviderError as e:
+        logger.error(f"🔍 load_calendar_events: Failed to fetch user profile: {e}")
+        return {"events": [], "error": f"Failed to fetch user profile: {str(e)}"}
+
+    # Build Google Calendar service with user's OAuth credentials
+    try:
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+        from google.auth.transport.requests import Request
+
+        credentials = Credentials(
+            token=None,
+            refresh_token=refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=GOOGLE_OAUTH_CLIENT_ID,
+            client_secret=GOOGLE_OAUTH_CLIENT_SECRET,
+            scopes=SCOPES,
+        )
+        # Refresh the token to get a valid access token
+        credentials.refresh(Request())
+
+        service = build("calendar", "v3", credentials=credentials)
+
+        # Fetch events from Google Calendar API
+        events_result = service.events().list(
+            calendarId='primary',
+            timeMin=from_iso,
+            timeMax=to_iso,
+            singleEvents=True,
+            orderBy='startTime'
+        ).execute()
+
+        events = events_result.get('items', [])
+        logger.info(f"🔍 load_calendar_events: loaded {len(events)} events from Google Calendar API")
+
+    except Exception as e:
+        logger.error(f"🔍 load_calendar_events: Failed to fetch events from Google Calendar API: {e}")
+        return {"events": [], "error": f"Failed to fetch calendar events: {str(e)}"}
+
+    # Normalize Google Calendar events to match expected format
     normalized = []
     for event in events:
+        start = event.get("start", {}).get("dateTime", "")
+        end = event.get("end", {}).get("dateTime", "")
+        location = event.get("location", "")
+
+        # Determine meeting mode based on location
+        meeting_mode = "online"
+        is_virtual = True
+        if location and location.lower() not in ["", "online", "zoom", "meet", "teams"]:
+            meeting_mode = "in_person"
+            is_virtual = False
+
         normalized.append(
             {
-                "title": event.title,
-                "time": event.start,
-                "location": event.location,
-                "is_virtual": event.is_virtual,
-                "meeting_mode": event.meeting_mode,
-                # For now use location as city when available.
-                # Later we can add geocoding parser.
-                "city": event.city,
-                "city_source": event.city_source,
-                "user_sub": event.user_sub,
+                "title": event.get("summary", "No title"),
+                "time": start,
+                "end": end,  # Include end time
+                "location": location,
+                "is_virtual": is_virtual,
+                "meeting_mode": meeting_mode,
+                "city": None,  # Will be filled by apply_user_default_city
+                "city_source": None,
+                "user_sub": user_sub,
             }
         )
 
-    requested_sub = (state.get("user_sub") or "").strip()
-    if requested_sub:
-        normalized = [event for event in normalized if event.get("user_sub") == requested_sub]
-
+    logger.info(f"🔍 load_calendar_events: returning {len(normalized)} events")
     return {"events": normalized, "error": None}
 
 def filter_in_person_events(state: GraphState) -> GraphState:
     """Keep only in-person events for weather evaluation."""
+    logger.info("🔍 filter_in_person_events: starting")
     events = state.get("events") or []
     in_person_events = []
 
@@ -354,6 +424,7 @@ def filter_in_person_events(state: GraphState) -> GraphState:
         if not bool(event.get("is_virtual")):
             in_person_events.append(event)
 
+    logger.info(f"🔍 filter_in_person_events: filtered to {len(in_person_events)} in-person events")
     return {"in_person_events": in_person_events}
 
 
@@ -365,31 +436,41 @@ def fetch_weather_for_events(state: GraphState) -> GraphState:
     - fetch weather near event time if city/time exist
     - otherwise attach explicit reason so scoring can classify blocked/unknown
     """
+    logger.info("🔍 fetch_weather_for_events: starting")
     events = state.get("in_person_events") or []
     if not events:
+        logger.info("🔍 fetch_weather_for_events: no in-person events, returning empty")
         return {"event_weather": []}
 
     results = []
-    with OpenMeteoClient() as client:
-        for event in events:
-            city = event.get("city")
-            if not city:
-                results.append({"event": event, "weather": None, "reason": "missing location"})
-                continue
+    logger.info(f"🔍 fetch_weather_for_events: fetching weather for {len(events)} events")
+    try:
+        with OpenMeteoClient() as client:
+            for event in events:
+                city = event.get("city")
+                if not city:
+                    results.append({"event": event, "weather": None, "reason": "missing location"})
+                    continue
 
-            event_time = event.get("time")
-            if not event_time:
-                results.append({"event": event, "weather": None, "reason": "missing event time"})
-                continue
+                event_time = event.get("time")
+                if not event_time:
+                    results.append({"event": event, "weather": None, "reason": "missing event time"})
+                    continue
 
-            try:
-                weather = client.get_weather_by_city_at_iso(city, event_time)
-                results.append({"event": event, "weather": weather.model_dump()})
-            except ValueError:
-                results.append({"event": event, "weather": None, "reason": "invalid event time"})
-            except (CityNotFoundError, WeatherProviderError):
-                results.append({"event": event, "weather": None, "reason": "weather unavailable"})
+                try:
+                    weather = client.get_weather_by_city_at_iso(city, event_time)
+                    results.append({"event": event, "weather": weather.model_dump()})
+                except ValueError as e:
+                    logger.warning(f"🔍 fetch_weather_for_events: ValueError for event: {e}")
+                    results.append({"event": event, "weather": None, "reason": "invalid event time"})
+                except (CityNotFoundError, WeatherProviderError) as e:
+                    logger.warning(f"🔍 fetch_weather_for_events: Weather error for event: {e}")
+                    results.append({"event": event, "weather": None, "reason": "weather unavailable"})
+    except Exception as e:
+        logger.error(f"🔍 fetch_weather_for_events: Unexpected error: {e}")
+        return {"event_weather": [], "error": str(e)}
 
+    logger.info(f"🔍 fetch_weather_for_events: completed with {len(results)} results")
     return {"event_weather": results}
 
 
@@ -400,6 +481,7 @@ def score_event_weather_risk(state: GraphState) -> GraphState:
     - unknown: weather unavailable for other reasons
     - low/moderate/high: based on weather code + wind speed
     """
+    logger.info("🔍 score_event_weather_risk: starting")
     event_weather = state.get("event_weather") or []
     risk_summary = []
     recommendations = []
@@ -514,6 +596,64 @@ def format_meeting_recommendations(state: GraphState) -> GraphState:
     return {"final_response": formatted_response}
 
 
+def format_all_meetings(state: GraphState) -> GraphState:
+    """
+    Format all meetings (online and in-person) with weather recommendations only for in-person.
+    Weather recommendations are added as internal smartness - only shown when relevant.
+    """
+    all_events = state.get("events") or []
+    recommendations = state.get("recommendations") or []
+    retrieved_context = state.get("retrieved_context") or []
+    error = state.get("error")
+
+    # Check for calendar errors first
+    if error:
+        return {"final_response": f"Unable to access your calendar: {error}"}
+
+    if not all_events:
+        return {"final_response": "No meetings found for this date."}
+
+    # Build meeting list
+    meeting_lines = []
+    for event in all_events:
+        title = event.get("summary", "No title")
+        time = event.get("start", {}).get("dateTime", "No time")
+        meeting_mode = event.get("extendedProperties", {}).get("private", {}).get("meeting_mode", "unknown")
+        
+        # Format time nicely
+        try:
+            from datetime import datetime
+            dt = datetime.fromisoformat(time.replace("Z", "+00:00"))
+            time_str = dt.strftime("%I:%M %p")
+        except:
+            time_str = time
+
+        meeting_lines.append(f"- {title} at {time_str} ({meeting_mode})")
+
+    formatted_response = "Your meetings today:\n" + "\n".join(meeting_lines)
+
+    # Add weather recommendations only if there are in-person meetings with recommendations
+    if recommendations:
+        in_person_count = sum(1 for e in all_events if e.get("extendedProperties", {}).get("private", {}).get("meeting_mode") == "in_person")
+        if in_person_count > 0:
+            formatted_response += "\n\nWeather recommendations for in-person meetings:\n" + "\n".join(recommendations)
+
+    if retrieved_context:
+        seen = set()
+        source_lines = []
+        for item in retrieved_context:
+            source = (item.get("source_file") or "unknown").strip()
+            if source in seen:
+                continue
+            seen.add(source)
+            source_lines.append(f"- {source}")
+
+        if source_lines:
+            formatted_response += "\n\nContext Sources:\n" + "\n".join(source_lines)
+
+    return {"final_response": formatted_response}
+
+
 
 def add_high_risk_actions(state: GraphState) -> GraphState:
     """
@@ -541,15 +681,18 @@ def llm_recommendation_rewrite(state: GraphState) -> GraphState:
     use LLM to rewrite deterministic risk_summary into concise recommendations.
     Falls back to existing recommendations on any failure.
     """
+    logger.info("🔍 llm_recommendation_rewrite: starting")
     risk_summary = state.get("risk_summary") or []
     fallback = list(state.get("recommendations") or [])
     user_profile = state.get("user_profile")
     retrieved_context = state.get("retrieved_context") or []
 
     if not risk_summary:
+        logger.info("🔍 llm_recommendation_rewrite: no risk_summary, using fallback")
         return {"recommendations": fallback}
-    
+
     if _should_skip_llm_rewrite_for_timeout(state):
+        logger.warning(f"🔍 llm_recommendation_rewrite: skipping due to timeout, risk_items={len(risk_summary)}")
         print(
             "Skipping LLM rewrite due to timeout pressure; "
             f"risk_items={len(risk_summary)}"
@@ -558,8 +701,11 @@ def llm_recommendation_rewrite(state: GraphState) -> GraphState:
 
 
     try:
+        logger.info("🔍 llm_recommendation_rewrite: building LLM messages")
         messages = _build_llm_rewrite_messages(risk_summary, fallback, user_profile, retrieved_context)
+        logger.info("🔍 llm_recommendation_rewrite: invoking LLM with retry")
         validated = _invoke_rewrite_model_with_retry(messages)
+        logger.info("🔍 llm_recommendation_rewrite: LLM invocation successful")
 
 
         rewritten = []
@@ -575,6 +721,7 @@ def llm_recommendation_rewrite(state: GraphState) -> GraphState:
             rewritten.append(line)
 
         if not rewritten:
+            logger.warning(f"🔍 llm_recommendation_rewrite: LLM returned zero recommendations, using fallback, risk_items={len(risk_summary)}")
             print(
                 "LLM rewrite returned zero recommendations; using fallback. "
                 f"risk_items={len(risk_summary)}"
@@ -592,9 +739,11 @@ def llm_recommendation_rewrite(state: GraphState) -> GraphState:
 
         return {"recommendations": rewritten or fallback}
     except ValidationError as exc:
+        logger.error(f"🔍 llm_recommendation_rewrite: ValidationError: {exc}")
         print(f"LLM rewrite validation failed; using fallback. details={exc}")
         return {"recommendations": fallback}
     except Exception as exc:
+        logger.error(f"🔍 llm_recommendation_rewrite: Exception: {exc}")
         print(f"LLM rewrite failed; using fallback. error={repr(exc)}")
         return {"recommendations": fallback}
 
@@ -726,3 +875,20 @@ def retrieve_meeting_context(state: GraphState) -> GraphState:
     "retrieved_context_by_event": {},
     "retrieval_query": retrieval_query,
 }
+        
+def add_retrieved_context_recommendations(state: GraphState) -> GraphState:
+    recommendations = list(state.get("recommendations") or [])
+    context_by_event = state.get("retrieved_context_by_event") or {}
+
+    for event_title, contexts in context_by_event.items():
+        if not contexts:
+            continue
+
+        best_context = contexts[0]
+        source = best_context.get("source_file") or "uploaded document"
+
+        recommendations.append(
+            f"{event_title}: use context from {source} when preparing for this meeting."
+        )
+
+    return {"recommendations": recommendations}       

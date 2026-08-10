@@ -34,6 +34,7 @@ class UserProfileSchema(BaseModel):
     commute_mode: str | None = None      # "car", "public_transport", "bike", "walk"
     ppe_required: bool = False           # hard hat, safety vest, etc.
     risk_tolerance: str | None = None    # "low", "medium", "high"
+    google_refresh_token: str | None = None  # OAuth refresh token for Google Calendar access
 
 
 class InternalProfileResponseSchema(BaseModel):
