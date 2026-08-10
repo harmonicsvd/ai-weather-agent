@@ -1,5 +1,8 @@
 # Agentic Tool Backend Service
 
+![Emo](Emo.png)
+
+
 ## 🎯 Project Vision
 
 Create a modular, extensible backend service that handles tool execution for AI agents. Separate conversation management from task execution, allowing the voice assistant to focus on natural language understanding while this service handles API integrations, data processing, and external service interactions securely and efficiently. The system is designed to support multiple tools - currently calendar operations are implemented, but the architecture allows for easy addition of new tools.
