@@ -26,14 +26,13 @@ class UserProfileSchema(BaseModel):
     """
     sub: str
     email: str
-    default_city: str
-    timezone: str
+    name: str | None = None
+    work_description: str | None = None
+    industry: str | None = None
+    responsibilities: str | None = None
+    company_name: str | None = None
+    work_environment: str | None = None
     updated_at: str
-    # NEW FIELDS - add these:
-    role: str | None = None              # "contractor", "architect", "manager", "developer"
-    commute_mode: str | None = None      # "car", "public_transport", "bike", "walk"
-    ppe_required: bool = False           # hard hat, safety vest, etc.
-    risk_tolerance: str | None = None    # "low", "medium", "high"
     google_refresh_token: str | None = None  # OAuth refresh token for Google Calendar access
 
 

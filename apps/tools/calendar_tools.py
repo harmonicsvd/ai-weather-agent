@@ -122,10 +122,9 @@ async def create_event_tool(
                         print(f"[create_event_tool] Using user email as calendar_id: {calendar_id}")
                         refresh_token = profile.google_refresh_token
                         print(f"[create_event_tool] Refresh token available: {bool(refresh_token)}")
-                        # Use timezone from profile if available
-                        if profile.timezone:
-                            timezone = profile.timezone
-                            print(f"[create_event_tool] Using timezone from profile: {timezone}")
+                        # Use default timezone since we removed it from profile schema
+                        timezone = "Europe/Berlin"
+                        print(f"[create_event_tool] Using default timezone: {timezone}")
                     else:
                         print(f"[create_event_tool] Profile found but no email, using fallback")
             except Exception as e:

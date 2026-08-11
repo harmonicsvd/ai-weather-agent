@@ -176,13 +176,16 @@ def apply_user_default_city(state: GraphState) -> GraphState:
     Ensure every in-person event has a weather city when possible.
 
     Priority:
-    1) user_profile.default_city from internal profile API
+    1) user_profile.work_environment (for field work/construction sites)
     2) leave missing so downstream can mark event as blocked
     """
     events = state.get("in_person_events") or []
 
     user_profile = state.get("user_profile") or {}
-    profile_default_city = (user_profile.get("default_city") or "").strip() or None
+    # Use work_environment as city hint for field work
+    profile_city = None
+    if user_profile.get("work_environment") in ["Field work", "Construction site"]:
+        profile_city = "unknown"  # Will be handled by user input
 
     updated = []
     for event in events:
@@ -193,8 +196,8 @@ def apply_user_default_city(state: GraphState) -> GraphState:
         city = None
         city_source = "missing"
 
-        if profile_default_city:
-            city = profile_default_city
+        if profile_city:
+            city = profile_city
             city_source = "profile_api"
 
         updated.append({**event, "city": city, "city_source": city_source})
