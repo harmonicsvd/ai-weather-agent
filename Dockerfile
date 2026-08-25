@@ -28,4 +28,4 @@ EXPOSE 9000
 ENV PYTHONUNBUFFERED=1
 
 # Run the application
-CMD ["uvicorn", "apps.main:app", "--host", "0.0.0.0", "--port", "9000"]
+CMD ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "9000"]
