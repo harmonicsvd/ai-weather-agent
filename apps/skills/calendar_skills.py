@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""Calendar tools for Sham."""
+"""Calendar skills for Sham."""
 
 import os
 from datetime import datetime, timedelta
@@ -9,14 +9,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
-from langchain_core.tools import tool
+from langchain.tools import tool
 from pydantic import BaseModel, Field
 
 # Ensure env vars are available
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env", override=False)
 
 from apps.google_clients import get_calendar_service
-from apps.tools.profile_client import ProfileClient
+from apps.skills.profile_client import ProfileClient
 import re
 
 def parse_duration_to_minutes(duration_str: str) -> int:
@@ -70,7 +70,7 @@ def parse_duration_to_minutes(duration_str: str) -> int:
     return int(total_minutes) if total_minutes > 0 else 60
 
 class CreateEventInput(BaseModel):
-    """Input schema for create-event tool."""
+    """Input schema for create-event skill."""
     name: str = Field(description="Participant name")
     date: str = Field(description="Date (YYYY-MM-DD)")
     time: str = Field(description="Time (HH:MM)")
@@ -84,7 +84,7 @@ class CreateEventInput(BaseModel):
     calendar_id: Optional[str] = Field(default="primary", description="Google Calendar ID (email address or 'primary')")
     timezone: Optional[str] = Field(default="Europe/Berlin", description="User timezone (e.g., Europe/Berlin, America/Los_Angeles)")
 
-@tool
+@tool("google_calendar")
 async def create_event_tool(
     name: str,
     date: str,
@@ -203,6 +203,6 @@ async def create_event_tool(
     except Exception as e:
         return f"Failed to create event: {str(e)}"
 
-# Register tools
-from apps.tools import register_tool
-register_tool(create_event_tool)
+# Register skills
+from apps.skills import register_skill
+register_skill(create_event_tool)

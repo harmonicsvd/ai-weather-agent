@@ -1,5 +1,5 @@
 """
-Meetings tools for backend agent.
+Meetings skills for backend agent.
 Direct Google Calendar API calls using user's OAuth tokens.
 """
 
@@ -22,12 +22,12 @@ GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 class MeetingsSummaryInput(BaseModel):
-    """Input schema for meetings-summary tool."""
+    """Input schema for meetings-summary skill."""
     date: Optional[str] = Field(default=None, description="Date (default=today)")
     timezone: str = Field(default="Europe/Berlin", description="Timezone")
     user_sub: str = Field(description="User identifier for per-user calendar access")
 
-@tool
+@tool("meeting_discussion")
 async def meetings_summary_tool(
     date: Optional[str] = None,
     timezone: str = "Europe/Berlin",
@@ -39,7 +39,7 @@ async def meetings_summary_tool(
     logger = logging.getLogger(__name__)
 
     # Fetch user's profile to get Google refresh token
-    from apps.tools.profile_client import ProfileClient, ProfileProviderError
+    from apps.skills.profile_client import ProfileClient, ProfileProviderError
 
     try:
         with ProfileClient() as profile_client:
@@ -139,6 +139,6 @@ async def meetings_summary_tool(
 
     return "\n".join(summary_lines)
 
-# Register tools
-from apps.tools import register_tool
-register_tool(meetings_summary_tool)
+# Register skills
+from apps.skills import register_skill
+register_skill(meetings_summary_tool)

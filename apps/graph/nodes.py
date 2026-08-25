@@ -17,13 +17,13 @@ logger = logging.getLogger(__name__)
 # - Each function reads a subset of GraphState and returns only keys it updates.
 # - Keep network calls inside dedicated node/tool helpers to make tests easier.
 from apps.graph.state import GraphState
-from apps.tools.weather_client import (
+from apps.skills.weather_client import (
     CityNotFoundError,
     OpenMeteoClient,
     WeatherProviderError,
 )
 from pydantic import ValidationError
-from apps.tools.schemas import LLMRecommendationsResponseSchema
+from apps.skills.schemas import LLMRecommendationsResponseSchema
 
 
 from datetime import datetime, timedelta, timezone
@@ -34,7 +34,7 @@ CALENDAR_API_BASE_URL = os.getenv("CALENDAR_API_BASE_URL", "http://127.0.0.1:800
 CALENDAR_INTERNAL_API_KEY = os.getenv("CALENDAR_INTERNAL_API_KEY", "")
 
 import json
-from apps.tools.profile_client import ProfileClient, ProfileProviderError
+from apps.skills.profile_client import ProfileClient, ProfileProviderError
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -325,7 +325,7 @@ def load_calendar_events(state: GraphState) -> GraphState:
         return {"events": [], "error": "User ID not provided."}
 
     # Fetch user's profile to get Google refresh token
-    from apps.tools.profile_client import ProfileClient, ProfileProviderError
+    from apps.skills.profile_client import ProfileClient, ProfileProviderError
 
     try:
         with ProfileClient() as profile_client:

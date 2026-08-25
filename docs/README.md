@@ -44,10 +44,10 @@ Node implementations live in `apps/graph/nodes.py`.
 Graph state contract: `apps/graph/state.py`.
 
 ### Clients
-- Weather: `apps/tools/weather_client.py`
-- Calendar backend: `apps/tools/calendar_client.py`
-- Profile backend: `apps/tools/profile_client.py`
-- Schemas: `apps/tools/schemas.py`
+- Weather: `apps/skills/weather_client.py`
+- Calendar backend: `apps/skills/calendar_client.py`
+- Profile backend: `apps/skills/profile_client.py`
+- Schemas: `apps/skills/schemas.py`
 
 ## Risk Scoring
 Core scoring is deterministic (rule-based):

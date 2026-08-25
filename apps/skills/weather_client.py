@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
-from apps.tools.schemas import (
+from apps.skills.schemas import (
     CurrentWeatherSchema,
     LocationSchema,
     WeatherByCityResponseSchema,

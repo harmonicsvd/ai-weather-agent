@@ -16,7 +16,7 @@ from apps.graph.nodes import (
 from langgraph.checkpoint.sqlite import SqliteSaver
 from apps.graph import workflows
 from apps.graph import nodes as nodes_module
-from apps.tools.schemas import LLMRecommendationsResponseSchema, LLMEventRecommendationSchema
+from apps.skills.schemas import LLMRecommendationsResponseSchema, LLMEventRecommendationSchema
 
 
 def _make_weather(weather_code: int, wind_speed_kmh: float, temperature_c: float) -> dict:

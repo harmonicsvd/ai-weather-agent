@@ -29,12 +29,12 @@ from apps.rag.ingestion import chunk_uploaded_markdown
 
 from apps.rag.embeddings import GeminiEmbeddingProvider
 
-from apps.tools import get_tool, list_tools
+from apps.skills import get_skill, list_skills
 from apps.google_clients import get_calendar_service
 
-# Import tool modules to register them
-import apps.tools.calendar_tools
-import apps.tools.meetings_tools
+# Import skill modules to register them
+import apps.skills.calendar_skills
+import apps.skills.meetings_skills
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env", override=False)
 
@@ -238,41 +238,82 @@ def extract_pdf_to_markdown(file_bytes: bytes, original_name: str) -> str:
     return "\n\n".join(sections).strip()
 
 
-@app.post("/internal/tools/{tool_name}")
-async def execute_tool(
-    tool_name: str,
-    parameters: dict,
+@app.post("/internal/skills/{skill_name}")
+async def execute_skill(
+    skill_name: str,
+    request: Request,
     x_internal_api_key: str | None = Header(default=None),
 ):
     """
-    Generic tool execution endpoint.
-    Executes any registered tool by name with provided parameters.
+    Generic skill execution endpoint.
+    Executes any registered skill by name with provided parameters.
+    Now checks if user has the skill installed.
+    Accepts JSON body with 'parameters' and 'user_sub' fields.
     """
     err = require_internal_api_key(x_internal_api_key)
     if err:
         return err
 
-    tool = get_tool(tool_name)
-    if not tool:
-        return JSONResponse({"error": f"Tool '{tool_name}' not found"}, status_code=404)
+    try:
+        # Parse JSON body
+        body = await request.json()
+        parameters = body.get("parameters", {})
+        user_sub = body.get("user_sub", "")
+        
+        if not user_sub:
+            return JSONResponse({"error": "user_sub is required"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": f"Invalid JSON body: {str(e)}"}, status_code=400)
+
+    # Check if user has this skill installed
+    from apps.skills import get_user_skills
+    user_skills = get_user_skills(user_sub)
+    if skill_name not in user_skills:
+        return JSONResponse(
+            {"error": f"Skill '{skill_name}' not installed for user"}, 
+            status_code=403
+        )
+
+    skill = get_skill(skill_name)
+    if not skill:
+        return JSONResponse({"error": f"Skill '{skill_name}' not found"}, status_code=404)
 
     try:
-        result = await tool.ainvoke(parameters)
+        result = await skill.ainvoke(parameters)
         return {"result": result, "success": True}
     except Exception as exc:
-        logger.error(f"Tool execution error for {tool_name}: {exc}", exc_info=True)
+        logger.error(f"Skill execution error for {skill_name}: {exc}", exc_info=True)
         return JSONResponse({"error": str(exc), "success": False}, status_code=500)
 
 
-@app.get("/internal/tools")
-def list_available_tools(x_internal_api_key: str | None = Header(default=None)):
-    """List all available tools."""
+@app.get("/internal/skills")
+def list_available_skills(
+    user_sub: str = Query(...),
+    x_internal_api_key: str | None = Header(default=None)
+):
+    """List skills available to a specific user."""
     err = require_internal_api_key(x_internal_api_key)
     if err:
         return err
 
-    tools = list_tools()
-    return {"tools": tools}
+    from apps.skills import get_user_skills
+    skills = get_user_skills(user_sub)
+    return {"skills": skills}
+
+
+@app.post("/internal/skills/cache/clear")
+def clear_skills_cache(
+    user_sub: str = Form(...),
+    x_internal_api_key: str | None = Header(default=None)
+):
+    """Clear skills cache for a user (call after install/uninstall)."""
+    err = require_internal_api_key(x_internal_api_key)
+    if err:
+        return err
+    
+    from apps.skills import clear_user_skills_cache
+    clear_user_skills_cache(user_sub)
+    return {"ok": True}
 
 
 

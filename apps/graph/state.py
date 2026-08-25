@@ -2,7 +2,7 @@ from typing import Literal, TypedDict
 
 """Shared typed state contract for LangGraph nodes."""
 
-from apps.tools.schemas import WeatherByCityResponseSchema
+from apps.skills.schemas import WeatherByCityResponseSchema
 
 
 class GraphState(TypedDict, total=False):

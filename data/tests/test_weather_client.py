@@ -2,12 +2,12 @@
 
 import pytest
 
-from apps.tools.schemas import (
+from apps.skills.schemas import (
     CurrentWeatherSchema,
     LocationSchema,
     WeatherByCityResponseSchema,
 )
-from apps.tools.weather_client import (
+from apps.skills.weather_client import (
     CityNotFoundError,
     OpenMeteoClient,
     WeatherProviderError,
