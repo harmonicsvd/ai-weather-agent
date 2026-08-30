@@ -5,11 +5,11 @@
 
 ## 🎯 Project Vision
 
-Create a modular, extensible backend service that handles skill execution for AI agents. Separate conversation management from task execution, allowing the voice assistant to focus on natural language understanding while this service handles API integrations, data processing, and external service interactions securely and efficiently. The system is designed to support multiple skills - currently calendar operations are implemented, but the architecture allows for easy addition of new skills.
+Create a modular, extensible backend service that handles skill execution for AI agents. Separate conversation management from task execution, allowing the voice assistant to focus on natural language understanding while this service handles API integrations, data processing, and external service interactions securely and efficiently. The system uses a skill-based architecture where capabilities are modular and can be installed/uninstalled by users.
 
 ## 🎯 What This Does
 
-A backend service that executes skills for the voice assistant. It provides a simple API for calendar operations and directly integrates with Google Calendar API using user OAuth tokens. This service eliminates intermediate API calls by handling Google Calendar operations directly.
+A backend service that executes skills for the voice assistant. It provides a unified API for scheduling calendar events, checking schedules, and searching meeting notes to help prepare for or discuss past meetings. Directly integrates with Google Calendar API and RAG (Retrieval Augmented Generation) for document queries.
 
 ## 🔗 How It Connects
 
@@ -29,8 +29,15 @@ Voice Agent → POST /internal/skills/{skill_name} → Backend Service → Googl
 ## 🛠️ Available Skills
 
 ### **Currently Working:**
-- **create_event_skill**: Creates Google Calendar events directly using user OAuth tokens
-- **meetings_summary_skill**: Fetches and summarizes calendar events directly from Google Calendar API
+- **google_calendar**: Creates Google Calendar events directly using user OAuth tokens
+- **meeting_discussion**: Fetches calendar events and searches knowledge base using RAG for meeting notes to help prepare for or discuss past meetings
+
+### **Knowledge Base (RAG):**
+The `meeting_discussion` skill includes integrated RAG (Retrieval Augmented Generation) functionality:
+- Supports querying uploaded documents (PDF, MD, TXT) using semantic search
+- Automatically searches knowledge base when users ask about meeting notes, requirements, or document content
+- Uses vector embeddings for intelligent document retrieval
+- Returns relevant document chunks with source attribution
 
 ### **How Skills Work:**
 1. Voice agent sends skill name and parameters to `POST /internal/skills/{skill_name}`
@@ -90,15 +97,18 @@ python -m uvicorn apps.api.main:app --reload
 - `DATABASE_URL`: Supabase PostgreSQL connection string (shared with voice agent)
 - `GOOGLE_OAUTH_CLIENT_ID`: Google OAuth client ID for Calendar API access
 - `GOOGLE_OAUTH_CLIENT_SECRET`: Google OAuth client secret for Calendar API access
-- `WEATHER_INTERNAL_API_KEY`: Internal API key for skill execution (must match voice agent's `WEATHER_AGENT_INTERNAL_API_KEY`)
+- `BACKEND_INTERNAL_API_KEY`: Internal API key for skill execution (must match voice agent's `BACKEND_INTERNAL_API_KEY`)
 - `PROFILE_API_BASE_URL`: Voice agent URL for profile data (`http://127.0.0.1:8000`)
 - `PROFILE_INTERNAL_API_KEY`: Voice agent internal API key (must match voice agent's `INTERNAL_API_KEY`)
+- `GOOGLE_API_KEY`: Google API key for embeddings (required for RAG)
+- `EMBEDDING_DIMENSION`: Embedding dimension for vector search (default: 3072)
+- `DEFAULT_SKILLS`: Comma-separated list of default skills to auto-install (default: google_calendar)
 
 ### **Database Setup**
 - **Provider**: Supabase (PostgreSQL hosting)
 - **Shared Instance**: Both voice assistant and backend service use the same database
 - **Purpose**: User profiles, OAuth refresh tokens, and application state
-- **Setup**: Run the migration scripts in `migrations/` folder to initialize database schema
+- **Setup**: Run `init_supabase.sql` in Supabase SQL Editor to initialize database schema (creates tables for user profiles, knowledge base vectors, and RAG functionality)
 - **Important**: Database must include `google_refresh_token` column in `user_profiles` table for OAuth authentication
 
 ## 📡 API Endpoints
@@ -153,7 +163,7 @@ The backend service follows a clean architecture pattern:
 │              Skill Execution Layer                       │
 │  ┌──────────────────────────────────────────────────┐  │
 │  │  Skill Registry | LangChain Integration          │  │
-│  │  create_event_skill | meetings_summary_skill     │  │
+│  │  google_calendar | meeting_discussion            │  │
 │  └──────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────┘
                             │
