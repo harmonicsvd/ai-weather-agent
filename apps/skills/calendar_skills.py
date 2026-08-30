@@ -71,10 +71,9 @@ def parse_duration_to_minutes(duration_str: str) -> int:
 
 class CreateEventInput(BaseModel):
     """Input schema for create-event skill."""
-    name: str = Field(description="Participant name")
+    title: str = Field(default="Meeting",description="Event title")
     date: str = Field(description="Date (YYYY-MM-DD)")
     time: str = Field(description="Time (HH:MM)")
-    title: Optional[str] = Field(default="Meeting", description="Event title")
     description: Optional[str] = Field(default=None, description="Meeting description/purpose")
     duration: Optional[str] = Field(default="1 hour", description="Duration")
     meeting_mode: str = Field(default="online", description="online or in_person")
@@ -83,13 +82,13 @@ class CreateEventInput(BaseModel):
     user_sub: str = Field(description="User identifier")
     calendar_id: Optional[str] = Field(default="primary", description="Google Calendar ID (email address or 'primary')")
     timezone: Optional[str] = Field(default="Europe/Berlin", description="User timezone (e.g., Europe/Berlin, America/Los_Angeles)")
+    name: Optional[str] = Field(default=None, description="Participant name (optional, for backward compatibility)")
 
 @tool("google_calendar")
 async def create_event_tool(
-    name: str,
+    title: str,
     date: str,
     time: str,
-    title: Optional[str] = "Meeting",
     description: Optional[str] = None,
     duration: Optional[str] = "1 hour",
     meeting_mode: str = "online",
@@ -97,7 +96,8 @@ async def create_event_tool(
     city: Optional[str] = None,
     user_sub: str = "",
     calendar_id: str = None,
-    timezone: str = "Europe/Berlin"
+    timezone: str = "Europe/Berlin",
+    name: Optional[str] = None
 ) -> str:
     """Create a calendar event. Use when user wants to book, schedule, or set up a meeting. Ask for: name, date, time, meeting mode (online/in-person), and optionally description/purpose.
     

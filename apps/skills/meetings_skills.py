@@ -21,19 +21,54 @@ GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
 
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
+def search_knowledge_base(query: str, user_sub: str, logger) -> str:
+    """Search user's knowledge base for meeting notes and discussion content."""
+    try:
+        from apps.rag.retriever import retrieve_user_context
+        from apps.rag.embeddings import GeminiEmbeddingProvider
+        
+        embedding_provider = GeminiEmbeddingProvider()
+        results = retrieve_user_context(
+            user_sub=user_sub,
+            query_text=query,
+            embedding_provider=embedding_provider,
+            top_k=3
+        )
+        
+        if not results:
+            return f"\n\nNo relevant meeting notes found for: '{query}'"
+        
+        # Format results
+        rag_lines = [f"\n\nMeeting Notes for: '{query}'"]
+        for i, result in enumerate(results, 1):
+            chunk = result.chunk
+            score = result.score
+            source_file = chunk.metadata.get("source_file", "unknown")
+            
+            rag_lines.append(f"\n--- From {source_file} (Relevance: {score:.2f}) ---")
+            rag_lines.append(chunk.text)
+        
+        return "\n".join(rag_lines)
+        
+    except Exception as e:
+        logger.error(f"RAG search failed: {e}")
+        return f"\n\nFailed to search meeting notes: {str(e)}"
+
 class MeetingsSummaryInput(BaseModel):
     """Input schema for meetings-summary skill."""
     date: Optional[str] = Field(default=None, description="Date (default=today)")
     timezone: str = Field(default="Europe/Berlin", description="Timezone")
     user_sub: str = Field(description="User identifier for per-user calendar access")
+    query: Optional[str] = Field(default=None, description="Optional query to search meeting notes/discussion content")
 
 @tool("meeting_discussion")
 async def meetings_summary_tool(
     date: Optional[str] = None,
     timezone: str = "Europe/Berlin",
-    user_sub: str = ""
+    user_sub: str = "",
+    query: Optional[str] = None
 ) -> str:
-    """Get meetings summary. Returns user's calendar events for the specified date. If there are in-person meetings, the assistant can naturally provide weather recommendations based on the context."""
+    """Get meetings summary. Returns user's calendar events for the specified date. If a query is provided, also searches meeting notes/discussion content from knowledge base. If there are in-person meetings, the assistant can naturally provide weather recommendations based on the context."""
 
     import logging
     logger = logging.getLogger(__name__)
@@ -54,6 +89,11 @@ async def meetings_summary_tool(
         return f"Failed to fetch user profile: {str(e)}"
 
     # Convert date to UTC window
+    # If only query is provided (no date), skip calendar fetch and only search knowledge base
+    if query and not date:
+        logger.info(f"📅 Query provided without date - skipping calendar fetch, searching knowledge base only")
+        return search_knowledge_base(query, user_sub, logger)
+    
     if not date:
         date = datetime.now().strftime("%Y-%m-%d")
 
@@ -100,6 +140,9 @@ async def meetings_summary_tool(
         return f"Failed to fetch calendar events: {str(e)}"
 
     if not events:
+        # If no events but query provided, still search knowledge base
+        if query:
+            return search_knowledge_base(query, user_sub, logger)
         return f"No meetings found for {date}."
 
     # Format meetings with full details
@@ -137,7 +180,14 @@ async def meetings_summary_tool(
                     f"- {summary} at {start} (Mode: {meeting_mode}, Location: {location})"
                 )
 
-    return "\n".join(summary_lines)
+    calendar_summary = "\n".join(summary_lines)
+    
+    # If query is provided, search knowledge base for meeting notes
+    if query:
+        rag_result = search_knowledge_base(query, user_sub, logger)
+        calendar_summary += rag_result
+    
+    return calendar_summary
 
 # Register skills
 from apps.skills import register_skill

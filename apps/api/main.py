@@ -266,19 +266,24 @@ async def execute_skill(
         return JSONResponse({"error": f"Invalid JSON body: {str(e)}"}, status_code=400)
 
     # Check if user has this skill installed
-    from apps.skills import get_user_skills
-    user_skills = get_user_skills(user_sub)
-    if skill_name not in user_skills:
-        return JSONResponse(
-            {"error": f"Skill '{skill_name}' not installed for user"}, 
-            status_code=403
-        )
+
+    INTERNAL_SKILLS = []  # No internal skills - all require installation
+    if skill_name not in INTERNAL_SKILLS:
+        from apps.skills import get_user_skills
+        user_skills = get_user_skills(user_sub)
+        if skill_name not in user_skills:
+            return JSONResponse(
+                {"error": f"Skill '{skill_name}' not installed for user"}, 
+                status_code=403
+            )
 
     skill = get_skill(skill_name)
     if not skill:
         return JSONResponse({"error": f"Skill '{skill_name}' not found"}, status_code=404)
 
     try:
+        # Add user_sub to parameters for skills that need it
+        parameters["user_sub"] = user_sub
         result = await skill.ainvoke(parameters)
         return {"result": result, "success": True}
     except Exception as exc:
